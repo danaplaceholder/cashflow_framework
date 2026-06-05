@@ -19,7 +19,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from cashflow.models.base import BaseCashflowModel
+from cashflow.models.base import BaseSubModule
 from cashflow.nodes.base import BaseNode
 
 _ID_SANITIZE = re.compile(r"[^0-9a-zA-Z_]")
@@ -112,5 +112,5 @@ def nodes_to_mermaid(nodes: BaseModel) -> str:
     return "\n".join(lines)
 
 
-def model_to_mermaid(model: BaseCashflowModel) -> str:
+def model_to_mermaid(model: BaseSubModule) -> str:
     return nodes_to_mermaid(model._nodes)

@@ -1,5 +1,4 @@
-# run the cashflow model
-from cashflow.models.example import RevenueExpenseCashflowModel
+from models.example import ExampleCashflowModel
 
-model = RevenueExpenseCashflowModel(graph_cache_key="example_graph_a")
+model = ExampleCashflowModel(graph_cache_key="example_graph")
 model.run()
