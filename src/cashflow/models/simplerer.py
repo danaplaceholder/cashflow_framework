@@ -93,9 +93,6 @@ class Submodule(BaseComputeUnit):
 class CashFlow(BaseComputeUnit):
     pass
 
-class CashFlowAggregator(BaseComputeUnit):
-    pass
-
 
 class ValuationDbAccessNode(Node):
         input: None = None
@@ -153,7 +150,7 @@ class ProformaSubmodule( Submodule):
                 fmv_db_access_node=self.input.valuation_submodule.output.fmv_node))
         return self.Output(proforma_db_access_node=proforma_db_access_node, proforma_calculation_node=proforma_calculation_node)
 
-class CashFlowModel(CashFlow):
+class OutermostComputeModel(CashFlow):
     input: None = None
     class Output(ComputeUnitOutput):
         valuation: ValuationSubmodule
@@ -165,28 +162,6 @@ class CashFlowModel(CashFlow):
 
         return self.Output(valuation=valuation, proforma=proforma, extra_output=Scalar(value=1000000))
 
-
-class CashFlowAnalysisModel(CashFlow):
-    input: None = None
-    class Input(ComputeUnitInput):
-        cashflow_model_Q1: CashFlowModel
-        cashflow_model_Q2: CashFlowModel
-        cashflow_model_Q3: CashFlowModel
-        cashflow_model_Q4: CashFlowModel
-    class Output(ComputeUnitOutput):
-        cashflow_model: CashFlow
-    def _compute_output(self) -> Output:
-        return self.Output(cashflow_model=self.input.cashflow_model)
-
-class QuarterlyCashFlowAggregatorModel(CashFlowAggregator):
-    input: None = None
-    class Output(ComputeUnitOutput):
-        cashflow_model_Q1: CashFlowModel
-        cashflow_model_Q2: CashFlowModel
-        cashflow_model_Q3: CashFlowModel
-        cashflow_model_Q4: CashFlowModel
-        cashflow_analysis_model: CashFlowAnalysisModel
-        
 
 CASHFLOW_HIERARCHY = [CashFlow, Submodule, Node, BaseDataElement]
 
@@ -204,8 +179,8 @@ for _compute_unit_cls in _all_compute_unit_subclasses():
     _compute_unit_cls._validate_class_structure()
 
 def main():
-    cashflow_model = CashFlowModel(my_config=ModelConfig(name="cashflow"))
-    print(cashflow_model.output.proforma.output.proforma_calculation_node.output.revenue_timeseries.values)
+    outermost_compute_model = OutermostComputeModel(my_config=ModelConfig(name="outmost"))
+    print(outermost_compute_model.output.proforma.output.proforma_calculation_node.output.revenue_timeseries.values)
 
 if __name__ == "__main__":
     main()
