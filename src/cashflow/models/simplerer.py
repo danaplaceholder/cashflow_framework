@@ -95,8 +95,11 @@ class CashFlowModel(Layers.CashFlow):
 
 
 def main():
-    outermost_compute_model = CashFlowModel(my_config=ModelConfig(name="outmost"))
-    print(outermost_compute_model.output.proforma.output.proforma_calculation_node.output.revenue_timeseries.values)
+    valuation_submodule = ValuationSubmodule(my_config=ModelConfig(name="valuation"))
+    print(valuation_submodule.output.fmv_node.output.fmv_from_db.value)
+
+    #outermost_compute_model = CashFlowModel(my_config=ModelConfig(name="outmost"))
+    #print(outermost_compute_model.output.proforma.output.proforma_calculation_node.output.revenue_timeseries.values)
 
 
 if __name__ == "__main__":

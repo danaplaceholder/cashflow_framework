@@ -33,20 +33,13 @@ class BaseComputeUnit(ABC, BaseModel):
     my_config: ModelConfig
     input: ComputeUnitInput | None = None
     _output: ComputeUnitOutput = PrivateAttr(default=None)
-    hierarchy: ClassVar[type['ModelHierarchy'] | None] = None
+    hierarchy: ClassVar[type['ModelHierarchy']]
 
     class Input(ComputeUnitInput):
         pass
 
     class Output(ComputeUnitOutput):
         pass
-
-    def __init_subclass__(cls, **kwargs) -> None:
-        super().__init_subclass__(**kwargs)
-        if cls.hierarchy is not None:
-            hierarchy = cls.hierarchy.get_hierarchy()
-            cls._validate_single_layer_inheritance(hierarchy)
-            cls._validate_class_structure(hierarchy)
 
     def __init__(self, my_config: ModelConfig, input: ComputeUnitInput | None = None):
         super().__init__(my_config=my_config, input=input)
