@@ -24,7 +24,7 @@ class ProformaDbAccessNode(Layers.Node):
 
     def _compute_output(self) -> Output:
         return self.Output(revenue_fmv_multiplier_per_year=Scalar(value=1.10))
-
+    
 
 class ProformaCalculationNode(Layers.Node):
     class Input(ComputeUnitInput):

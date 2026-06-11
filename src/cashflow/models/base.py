@@ -33,13 +33,23 @@ class BaseComputeUnit(ABC, BaseModel):
     my_config: ModelConfig
     input: ComputeUnitInput | None = None
     _output: ComputeUnitOutput = PrivateAttr(default=None)
-    hierarchy: ClassVar[type['ModelHierarchy']]
+    hierarchy: ClassVar[type['ModelHierarchy'] | None] = None
 
     class Input(ComputeUnitInput):
         pass
 
     class Output(ComputeUnitOutput):
         pass
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs) -> None:
+        super().__pydantic_init_subclass__(**kwargs)
+        try:
+            hierarchy = cls.hierarchy_for_class().get_hierarchy()
+        except ValueError:
+            return
+        cls._validate_single_layer_inheritance(hierarchy)
+        cls._validate_class_structure(hierarchy)
 
     def __init__(self, my_config: ModelConfig, input: ComputeUnitInput | None = None):
         super().__init__(my_config=my_config, input=input)
@@ -64,9 +74,8 @@ class BaseComputeUnit(ABC, BaseModel):
     @classmethod
     def hierarchy_for_class(cls) -> type['ModelHierarchy']:
         for klass in cls.__mro__:
-            if klass.hierarchy is not None:
-                hierarchy = klass.hierarchy
-                cls._validate_single_layer_inheritance(hierarchy.get_hierarchy())
+            hierarchy = getattr(klass, 'hierarchy', None)
+            if hierarchy is not None:
                 return hierarchy
         raise ValueError(
             f"{cls.__name__} has no hierarchy; subclass a layer nested inside a ModelHierarchy"
@@ -128,17 +137,10 @@ class ModelHierarchyMeta(type):
         ]
         for layer in layer_classes:
             layer.hierarchy = cls
-        try:
-            hierarchy = cls.get_hierarchy()
-        except NotImplementedError:
-            return cls
-        for layer in layer_classes:
-            layer._validate_single_layer_inheritance(hierarchy)
-            layer._validate_class_structure(hierarchy)
         return cls
 
 
 class ModelHierarchy(metaclass=ModelHierarchyMeta):
     @classmethod
     def get_hierarchy(cls) -> list[type]:
-        raise NotImplementedError
+        raise ValueError("ModelHierarchy is an abstract class and cannot be instantiated")
