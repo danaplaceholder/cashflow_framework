@@ -4,6 +4,10 @@ from pydantic import BaseModel, PrivateAttr
 from datetime import datetime
 
 
+class AbstractComputeUnit(ABC):
+    pass
+
+
 class BaseDataElement(ABC, BaseModel):
     pass
 
@@ -56,6 +60,8 @@ class BaseComputeUnit(ABC, BaseModel):
         layer = self.get_class_in_hierarchy(type(self).hierarchy_for_class().get_hierarchy())
         if type(self) is layer:
             raise ValueError(f"class {self} must not be an instance of type {layer}")
+        if AbstractComputeUnit in self.__class__.__bases__:
+            raise ValueError(f"class {self.__class__.__name__} is abstract and cannot be instantiated")
 
     @classmethod
     def _class_in_hierarchy(cls, hierarchy: list[type]) -> type['BaseComputeUnit']:
@@ -80,6 +86,7 @@ class BaseComputeUnit(ABC, BaseModel):
         raise ValueError(
             f"{cls.__name__} has no hierarchy; subclass a layer nested inside a ModelHierarchy"
         )
+        
 
     @classmethod
     def _validate_single_layer_inheritance(cls, hierarchy: list[type]) -> None:
@@ -109,6 +116,8 @@ class BaseComputeUnit(ABC, BaseModel):
             if not issubclass(field_type, class_in_hierarchy):
                 raise ValueError(f"field {field_name} must be a subclass of type {class_in_hierarchy}")
         one_level_down_from_cls = cls._child_in_hierarchy(hierarchy)
+        if len(cls.Output.model_fields) == 0 and AbstractComputeUnit not in cls.__bases__:
+            raise ValueError(f"class {cls.__name__} has no output fields")
         for field_name, field_info in cls.Output.model_fields.items():
             field_type = field_info.annotation
             if not issubclass(field_type, one_level_down_from_cls):

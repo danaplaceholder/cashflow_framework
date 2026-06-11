@@ -1,11 +1,16 @@
 
 from datetime import datetime, timedelta
 
-from cashflow.models.base import ComputeUnitInput, ComputeUnitOutput, ModelConfig, Scalar, TimeSeries
+from cashflow.models.base import ComputeUnitInput, AbstractComputeUnit, ComputeUnitOutput, ModelConfig, Scalar, TimeSeries
 from cashflow.models.layers import Layers
 
+class DbAccessNode(Layers.Node, AbstractComputeUnit ):
+    pass
 
-class ValuationDbAccessNode(Layers.Node):
+class CalculationNode(Layers.Node, AbstractComputeUnit ):
+    pass
+
+class ValuationDbAccessNode(DbAccessNode):
     input: None = None
 
     class Output(ComputeUnitOutput):
@@ -16,7 +21,7 @@ class ValuationDbAccessNode(Layers.Node):
         return self.Output(fmv_from_db=Scalar(value=1000000), step_up_pct_from_db=Scalar(value=0.05))
 
 
-class ProformaDbAccessNode(Layers.Node):
+class ProformaDbAccessNode(DbAccessNode):
     input: None = None
 
     class Output(ComputeUnitOutput):
@@ -26,7 +31,7 @@ class ProformaDbAccessNode(Layers.Node):
         return self.Output(revenue_fmv_multiplier_per_year=Scalar(value=1.10))
     
 
-class ProformaCalculationNode(Layers.Node):
+class ProformaCalculationNode(CalculationNode):
     class Input(ComputeUnitInput):
         proforma_db_access_node: ProformaDbAccessNode
         fmv_db_access_node: ValuationDbAccessNode
@@ -45,6 +50,27 @@ class ProformaCalculationNode(Layers.Node):
         )
         return self.Output(revenue_timeseries=revenue_timeseries)
 
+class AbstractLoanDbAccessNode(DbAccessNode, AbstractComputeUnit):
+    class Output(ComputeUnitOutput):
+        loan_amount: Scalar
+        interest_rate: Scalar
+        fee_schedule: TimeSeries
+
+class AbstractLoanCalculationeNode(CalculationNode, AbstractComputeUnit): 
+    class Input(ComputeUnitInput):
+        loan_db_access_node: AbstractLoanDbAccessNode
+    class Output(ComputeUnitOutput):
+        principal: TimeSeries
+        interest: TimeSeries
+class AbstractLoanSubmodule(Layers.Submodule, AbstractComputeUnit):
+    class Output(ComputeUnitOutput):
+        loan_db_access_node: AbstractLoanDbAccessNode
+        debt_service_node: AbstractLoanCalculationeNode
+
+class ConstructionLoanDbAccessNode(DbAccessNode):
+    class Output(ComputeUnitOutput):
+        construction_amount: Scalar
+        construction_schedule: TimeSeries
 
 class ValuationSubmodule(Layers.Submodule):
     input: None = None
