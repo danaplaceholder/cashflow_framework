@@ -8,6 +8,7 @@ dependencies = [
     "numpy>=1.26",
     "blake3>=0.4",
     "orjson>=3.9",
+    "pandas>=2.0",
 ]
 
 [project.optional-dependencies]
