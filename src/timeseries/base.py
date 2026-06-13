@@ -7,7 +7,22 @@ from functools import cached_property
 import hashlib
 from enum import Enum
 from pydantic import BaseModel
+import numpy as np
+class BucketConfig(BaseModel):
+    class ArrearsAdvance(Enum):
+        ADVANCE = "advance"
+        ARREARS = "arrears"
 
+    class CollapseSpreadPair(Enum):
+        COLLAPSE_BY_SUM_SPREAD_BY_INTERPOLATE = "collapse_by_sum_spread_by_interpolate"
+        COLLAPSE_BY_WEIGHTED_AVERAGE_SPREAD_BY_REPEAT = "collapse_by_weighted_average_spread_by_repeat"
+
+    arrears_advance: ArrearsAdvance
+    collapse_spread_pair: CollapseSpreadPair
+
+    @cached_property
+    def hash(self) -> str:
+        return hashlib.sha256(str(self).encode()).hexdigest()
 
 class Values(BaseDataElement):
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -41,9 +56,17 @@ class Values(BaseDataElement):
 
 
 class TimePoints(BaseDataElement):
+    class Periodicity(Enum):
+        DAILY = "daily"
+        MONTHLY = "monthly"
+        QUARTERLY = "quarterly"
+        YEARLY = "yearly"
+        SEMIANNUAL = "semiannual"
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
     name: str = ""
     dates: list[datetime.datetime]
+    periodicity: Periodicity
 
     @cached_property
     def hash(self) -> str:
@@ -87,41 +110,63 @@ class TimePoints(BaseDataElement):
     def __len__(self) -> int:
         return len(self.dates)
 
-class BucketConfig(BaseModel):
-    class ArrearsAdvance(Enum):
-        ADVANCE = "advance"
-        ARREARS = "arrears"
+    def get_matrix_for_target_time_points(self, target_time_points: TimePoints, bucket_config: BucketConfig) -> np.ndarray:
+        source_intervals = self._get_intervals(bucket_config)
+        target_intervals = target_time_points._get_intervals(bucket_config)
+        matrix = np.zeros((len(source_intervals), len(target_intervals)))
+        # TODO: optimize for log(n) time complexity
+        # TODO: validate actual results make sure orientation is correct
+        for i in range(len(source_intervals)):
+            for j in range(len(target_intervals)):
+                overlap_days = max(
+                     0, 
+                     min(source_intervals[i][1], target_intervals[j][1]) - 
+                         max(source_intervals[i][0], target_intervals[j][0]))
+                matrix[i, j] = overlap_days
+        if bucket_config.collapse_spread_pair == BucketConfig.CollapseSpreadPair.COLLAPSE_BY_SUM_SPREAD_BY_INTERPOLATE:
+            # normalize on columns, to assign a portion of each source interval to each target interval
 
-    class Periodicity(Enum):
-        DAILY = "daily"
-        MONTHLY = "monthly"
-        QUARTERLY = "quarterly"
-        YEARLY = "yearly"
-        SEMIANNUAL = "semiannual"
+        elif bucket_config.collapse_spread_pair == BucketConfig.CollapseSpreadPair.COLLAPSE_BY_WEIGHTED_AVERAGE_SPREAD_BY_REPEAT:
+            #normalize on rows, to wind up with 1 where only one interval covering target, use weighted average where multiples
 
-    class CollapseMethod(Enum):
-        AVERAGE = "average"
-        SUM = "sum"
-        CLOSEST = "closest"
-        MAX = "max"
-        MIN = "min"
-        COUNT = "count"
-        NONE = "none"
-    class SpreadMethod(Enum):
-        REPEAT_AVERAGE = "repeat_average"
-        REPEAT_CLOSEST = "repeat_closest"
-        ZERO_FILL = "zero_fill"
-        INTERPOLATE = "interpolate" # smear/average ...... 
-        NONE = "none"
+        
 
-    arrears_advance: ArrearsAdvance
-    periodicity: Periodicity
-    collapse_method: CollapseMethod
-    spread_method: SpreadMethod
+    def _get_intervals(self, bucket_config: BucketConfig) -> list[tuple[datetime.datetime, datetime.datetime]]:
+        
+        # if arrears, then first interval STARTS BEFORE first date 
+        # periodicity says how many days to lead/trail by 
+        if bucket_config.arrears_advance == BucketConfig.ArrearsAdvance.ARREARS:
+            trailing_dates = []
+            if self.periodicity ==TimePoints.Periodicity.DAILY:
+                leading_dates = [self.dates[0] - datetime.timedelta(days=1)]    
+            elif self.periodicity == TimePoints.Periodicity.MONTHLY:
+                leading_dates = [self.dates[0] - datetime.timedelta(days=30)]
+            elif self.periodicity == TimePoints.Periodicity.QUARTERLY:
+                leading_dates = [self.dates[0] - datetime.timedelta(days=90)]
+            elif self.periodicity == TimePoints.Periodicity.YEARLY:
+                leading_dates = [self.dates[0] - datetime.timedelta(days=365)]
+            else:
+                raise ValueError(f"Invalid periodicity: {self.periodicity}")
+        elif bucket_config.arrears_advance == BucketConfig.ArrearsAdvance.ADVANCE:
+            leading_dates = []
+            if self.periodicity == TimePoints.Periodicity.DAILY:
+                trailing_dates = [self.dates[-1] + datetime.timedelta(days=1)]
+            elif self.periodicity == TimePoints.Periodicity.MONTHLY:
+                trailing_dates = [self.dates[-1] + datetime.timedelta(days=30)]
+            elif self.periodicity == TimePoints.Periodicity.QUARTERLY:
+                trailing_dates = [self.dates[-1] + datetime.timedelta(days=90)]
+            elif self.periodicity == TimePoints.Periodicity.YEARLY:
+                trailing_dates = [self.dates[-1] + datetime.timedelta(days=365)]
+            else:
+                raise ValueError(f"Invalid periodicity: {self.periodicity}")
+        else:
+            raise ValueError(f"Invalid arrears_advance: {bucket_config.arrears_advance}")
+        dates_to_use = leading_dates + self.dates + trailing_dates
+        intervals = []
+        for i in range(len(dates_to_use) - 1):
+            intervals.append((dates_to_use[i], dates_to_use[i + 1]))
+        return intervals
 
-    @cached_property
-    def hash(self) -> str:
-        return hashlib.sha256(str(self).encode()).hexdigest()
 
 class TimeSeries(BaseDataElement):
     model_config = ConfigDict(arbitrary_types_allowed=True)

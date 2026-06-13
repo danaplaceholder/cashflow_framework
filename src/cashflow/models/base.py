@@ -2,7 +2,7 @@ from abc import ABC
 from typing import ClassVar
 from pydantic import BaseModel, PrivateAttr
 from datetime import datetime
-
+from cashflow.viz import _render_registry
 
 class AbstractComputeUnit(ABC):
     pass
@@ -48,20 +48,28 @@ class BaseComputeUnit(ABC, BaseModel):
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs) -> None:
         super().__pydantic_init_subclass__(**kwargs)
-        try:
-            hierarchy = cls.hierarchy_for_class().get_hierarchy()
-        except ValueError:
-            return
-        cls._validate_single_layer_inheritance(hierarchy)
-        cls._validate_class_structure(hierarchy)
+        cls._validate_class()
 
     def __init__(self, my_config: ModelConfig, input: ComputeUnitInput | None = None):
         super().__init__(my_config=my_config, input=input)
+        self._validate_instance()
+
+    def _validate_instance(self) -> None:
         layer = self.get_class_in_hierarchy(type(self).hierarchy_for_class().get_hierarchy())
         if type(self) is layer:
-            raise ValueError(f"class {self} must not be an instance of type {layer}")
+            raise ValueError(f"class {self.__class__.__name__} cannot be instantiated as it is the layer itself")
         if AbstractComputeUnit in self.__class__.__bases__:
-            raise ValueError(f"class {self.__class__.__name__} is abstract and cannot be instantiated")
+            raise ValueError(f"class {self.__class__.__name__} cannot be instantiated as it has been tagged as abstract")
+
+    @classmethod
+    def _validate_class(cls) -> None:
+        try:
+            hierarchy = cls.hierarchy_for_class().get_hierarchy()
+        except ValueError:
+             #TODO : should this be an error?
+            return
+        cls._validate_single_layer_inheritance(hierarchy)
+        cls._validate_class_structure(hierarchy)
 
     @classmethod
     def _class_in_hierarchy(cls, hierarchy: list[type]) -> type['BaseComputeUnit']:
@@ -135,6 +143,40 @@ class BaseComputeUnit(ABC, BaseModel):
     def _compute_output(self) -> ComputeUnitOutput:
         raise NotImplementedError("must be implemented by subclass")
 
+    # visualizing the DAG
+    def _walk(self, reg):
+        uid = id(self)
+        if uid in reg["units"]:
+            return
+        reg["units"][uid] = self
+    
+        inp = getattr(self, "input", None)
+        if inp:
+            for f in type(inp).model_fields:
+                dep = getattr(inp, f)
+                if isinstance(dep, BaseComputeUnit):
+                    reg["edges"].append((id(dep), uid, f))
+                    dep._walk(reg)
+
+        try:
+            out = self.output
+        except Exception:
+            out = None
+        if out:
+            for f in type(out).model_fields:
+                child = getattr(out, f)
+                if isinstance(child, BaseComputeUnit):
+                    reg["contains"].append((uid, id(child)))
+                    child._walk(reg)
+    
+    def render(self, path="graph.svg"):
+        reg = {"units": {}, "contains": [], "edges": []}
+        self._walk(reg)
+        _render_registry(reg, path)
+        return path
+
+
+
 
 class ModelHierarchyMeta(type):
     def __new__(mcs, name: str, bases: tuple[type, ...], namespace: dict, **kwargs):
@@ -145,6 +187,7 @@ class ModelHierarchyMeta(type):
             if isinstance(attr, type) and issubclass(attr, BaseComputeUnit)
         ]
         for layer in layer_classes:
+            # Attach the outer class as heirarchy to each inner class
             layer.hierarchy = cls
         return cls
 

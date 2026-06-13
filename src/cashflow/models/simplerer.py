@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 from cashflow.models.base import ComputeUnitInput, AbstractComputeUnit, ComputeUnitOutput, ModelConfig, Scalar, TimeSeries
 from cashflow.models.layers import Layers
-
+import os
 class DbAccessNode(Layers.Node, AbstractComputeUnit ):
     pass
 
@@ -121,12 +121,15 @@ class CashFlowModel(Layers.CashFlow):
 
 
 def main():
-    valuation_submodule = ValuationSubmodule(my_config=ModelConfig(name="valuation"))
-    print(valuation_submodule.output.fmv_node.output.fmv_from_db.value)
+    #valuation_submodule = ValuationSubmodule(my_config=ModelConfig(name="valuation"))
+    #print(valuation_submodule.output.fmv_node.output.fmv_from_db.value)
 
-    #outermost_compute_model = CashFlowModel(my_config=ModelConfig(name="outmost"))
-    #print(outermost_compute_model.output.proforma.output.proforma_calculation_node.output.revenue_timeseries.values)
-
+    outermost_compute_model = CashFlowModel(my_config=ModelConfig(name="outmost"))
+    print(outermost_compute_model.output.proforma.output.proforma_calculation_node.output.revenue_timeseries.values)
+    name = f"cashflow_{outermost_compute_model.my_config.name}"
+    full_path = os.path.join(os.path.dirname(__file__), f"{name}.svg")  
+    outermost_compute_model.render(full_path)
+    print(f"wrote {full_path}")
 
 if __name__ == "__main__":
     main()

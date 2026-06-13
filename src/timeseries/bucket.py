@@ -15,6 +15,9 @@ from decimal import Decimal
 
 
 class MultiplierMatrix(BaseModel):
+    """
+    Time complexity: O(Source_length*log(Target_length))
+    """
     src_time_points: TimePoints
     target_time_points: TimePoints
     bucket_config: BucketConfig
@@ -26,7 +29,15 @@ class MultiplierMatrix(BaseModel):
         """
         src_intervals = self.src_time_points.get_intervals(self.bucket_config)
         target_intervals = self.target_time_points.get_intervals(self.bucket_config)
-        # TODO:
+        for src_interval in src_intervals:
+            # OVERLAP BEGIN:  EARLIEST target interval T_0 that ends AFTER my src interval starts
+            # OVERLAP END:  LATEST target interval T_nthat starts BEFORE my src interval ends
+            # for DOLLARS ... each row is how much of each src to include in the target value..... this would be collapsing multiple srcs into one target.... 
+            #  ...... BUT each src could still cover more than one target .. in this case , for DOLLAR ..... would normalize on columns .... 
+            # for RATES ...... each row is how many days to attriute to each src ...... normalize on ROWS ........ this applies if taking the AVERAGE ....... for collapsing ...... 
+            # ..... if taking the LAST rate ..... would take the right most value in each row ... I think ? ????
+            #          
+            
     def apply_to_values(self, values: list[float | int | Decimal]) -> list[float | int | Decimal]:
         #TODO: Implement this
         matrix = self.multiplier_matrix
