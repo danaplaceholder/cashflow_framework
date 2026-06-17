@@ -1,32 +1,80 @@
 from abc import ABC
+from ast import Pass
 from typing import ClassVar
 from pydantic import BaseModel, PrivateAttr
 from datetime import datetime
 from cashflow.viz import _render_registry
+from functools import cached_property
+import hashlib
+from pydantic import ConfigDict
+from typing import Any
 
-class AbstractComputeUnit(ABC):
+"""
+TODO:
+- hash functions 
+- caching ......
+- time series implementation with bucjeting etc ......  
+--....... not much else ! 
+
+"""
+class FrozenModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    # make immutable 
+    def __setattr__(self, name: str, value: Any) -> None:
+        # allow setting of private attributes
+        if name.startswith("_"):
+            super().__setattr__(name, value)
+            return
+        else:
+            raise AttributeError(f"cannot set attribute {name} of {self.__class__.__name__}")
+    
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(f"cannot delete attribute {name} of {self.__class__.__name__}")
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._validate()
+
+    def _validate(self) -> None:
+        pass
+class AbstractComputeUnit(ABC, FrozenModel):
     pass
 
 
-class BaseDataElement(ABC, BaseModel):
-    pass
+class BaseDataElement(ABC, FrozenModel):
+    input_hash: str = "" # can add an input hash per model_config or other things so don't have to hash really long time series values or dates
 
-
+    def hash(self) -> str:
+        if self.input_hash:
+            return self.input_hash
+        else:
+            return hashlib.sha256(str(self.model_dump()).encode()).hexdigest()
 class TimeSeries(BaseDataElement):
     values: list[float]
     dates: list[datetime]
 
-
 class Scalar(BaseDataElement):
     value: float | int | bool | str
 
+class TradeList(BaseDataElement):
+    class Trade(BaseModel):
+        symbol: str
+        category: str
+        trade_id: str
+        direction: str
+    trades: list[Trade]
 
 class ModelConfig(BaseModel):
     name: str
+    @cached_property
+    def hash(self) -> str:
+        return "model_config_hash"
 
 
 class ComputeUnitInput(BaseModel):
-    pass
+    pass # TODO: add input hash
+    
 
 
 class ComputeUnitOutput(BaseModel):
@@ -34,6 +82,7 @@ class ComputeUnitOutput(BaseModel):
 
 
 class BaseComputeUnit(ABC, BaseModel):
+
     my_config: ModelConfig
     input: ComputeUnitInput | None = None
     _output: ComputeUnitOutput = PrivateAttr(default=None)
@@ -44,6 +93,10 @@ class BaseComputeUnit(ABC, BaseModel):
 
     class Output(ComputeUnitOutput):
         pass
+
+    def hash(self) -> str:
+        pass
+
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs) -> None:
@@ -121,6 +174,8 @@ class BaseComputeUnit(ABC, BaseModel):
         class_in_hierarchy = cls._class_in_hierarchy(hierarchy)
         for field_name, field_info in cls.Input.model_fields.items():
             field_type = field_info.annotation
+            if field_type == list:
+                field_type = field_info.annotation[0]
             if not issubclass(field_type, class_in_hierarchy):
                 raise ValueError(f"field {field_name} must be a subclass of type {class_in_hierarchy}")
         one_level_down_from_cls = cls._child_in_hierarchy(hierarchy)
@@ -128,6 +183,8 @@ class BaseComputeUnit(ABC, BaseModel):
             raise ValueError(f"class {cls.__name__} has no output fields")
         for field_name, field_info in cls.Output.model_fields.items():
             field_type = field_info.annotation
+            if field_type == list:
+                field_type = field_info.annotation[0]
             if not issubclass(field_type, one_level_down_from_cls):
                 raise ValueError(f"field {field_name} must be of type {one_level_down_from_cls}")
 
@@ -168,6 +225,7 @@ class BaseComputeUnit(ABC, BaseModel):
                 if isinstance(child, BaseComputeUnit):
                     reg["contains"].append((uid, id(child)))
                     child._walk(reg)
+                    
     
     def render(self, path="graph.svg"):
         reg = {"units": {}, "contains": [], "edges": []}
