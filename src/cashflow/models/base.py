@@ -44,6 +44,13 @@ class AbstractComputeUnit(ABC, FrozenModel):
 
 class BaseDataElement(ABC, FrozenModel):
     input_hash: str = "" # can add an input hash per model_config or other things so don't have to hash really long time series values or dates
+    _source_compute_unit: 'BaseComputeUnit' = PrivateAttr(default=None)
+
+    def set_source_compute_unit(self, source_compute_unit: 'BaseComputeUnit') -> None:
+        self._source_compute_unit = source_compute_unit
+    
+    def get_source_compute_unit(self) -> 'BaseComputeUnit':
+        return self._source_compute_unit
 
     def hash(self) -> str:
         if self.input_hash:
@@ -78,14 +85,15 @@ class ComputeUnitInput(BaseModel):
 
 
 class ComputeUnitOutput(BaseModel):
-    pass
-
+    pass  
 
 class BaseComputeUnit(ABC, BaseModel):
 
     my_config: ModelConfig
     input: ComputeUnitInput | None = None
     _output: ComputeUnitOutput = PrivateAttr(default=None)
+    _dependents: list['BaseComputeUnit'] = PrivateAttr(default_factory=list)
+    _source_compute_unit: 'BaseComputeUnit' = PrivateAttr(default=None)
     hierarchy: ClassVar[type['ModelHierarchy'] | None] = None
 
     class Input(ComputeUnitInput):
@@ -97,6 +105,24 @@ class BaseComputeUnit(ABC, BaseModel):
     def hash(self) -> str:
         pass
 
+    @property
+    def name(self) -> str:
+        memory_address = id(self)
+        return f"{self.__class__.__name__}_{memory_address}"
+
+
+    def set_source_compute_unit(self, source_compute_unit: 'BaseComputeUnit') -> None:
+        self._source_compute_unit = source_compute_unit
+
+    def get_source_compute_unit(self) -> 'BaseComputeUnit':
+        return self._source_compute_unit
+    
+    def get_dependents(self) -> list['BaseComputeUnit']:
+        return self._dependents
+    
+
+
+
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs) -> None:
@@ -106,6 +132,19 @@ class BaseComputeUnit(ABC, BaseModel):
     def __init__(self, my_config: ModelConfig, input: ComputeUnitInput | None = None):
         super().__init__(my_config=my_config, input=input)
         self._validate_instance()
+        self._add_instance_to_input_node_dependents()
+    
+    def add_dependent(self, dependent: 'BaseComputeUnit') -> None:
+        self._dependents.append(dependent)
+
+    def _add_instance_to_input_node_dependents(self) -> None:
+        if self.input:
+            for field_name, field_info in self.Input.model_fields.items():
+                value = getattr(self.input, field_name)
+                if issubclass(field_info.annotation, BaseComputeUnit):
+                    value.add_dependent(self)
+                else:
+                    raise ValueError(f"field {field_name} must be a subclass of BaseComputeUnit")
 
     def _validate_instance(self) -> None:
         layer = self.get_class_in_hierarchy(type(self).hierarchy_for_class().get_hierarchy())
@@ -195,7 +234,16 @@ class BaseComputeUnit(ABC, BaseModel):
         return self._output
 
     def run(self) -> ComputeUnitOutput:
-        self._output = self._compute_output()
+        t_output = self._compute_output()
+        for output_name, output_info in self.Output.model_fields.items():
+            value = getattr(t_output, output_name)
+            if issubclass(output_info.annotation, BaseDataElement):
+                value.set_source_compute_unit(self)
+            elif issubclass(output_info.annotation, BaseComputeUnit):
+                value.set_source_compute_unit(self)
+            else:
+                raise ValueError(f"field {output_name} must be a subclass of BaseDataElement or BaseComputeUnit")
+        self._output = t_output
 
     def _compute_output(self) -> ComputeUnitOutput:
         raise NotImplementedError("must be implemented by subclass")
@@ -225,6 +273,8 @@ class BaseComputeUnit(ABC, BaseModel):
                 if isinstance(child, BaseComputeUnit):
                     reg["contains"].append((uid, id(child)))
                     child._walk(reg)
+                elif isinstance(child, BaseDataElement):
+                    print(f"data element {f} comes from the base compute unit {child.get_source_compute_unit().name}")
                     
     
     def render(self, path="graph.svg"):
