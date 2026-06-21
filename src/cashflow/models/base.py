@@ -226,6 +226,10 @@ class BaseComputeUnit(ABC, BaseModel):
                 field_type = field_info.annotation[0]
             if not issubclass(field_type, one_level_down_from_cls):
                 raise ValueError(f"field {field_name} must be of type {one_level_down_from_cls}")
+        # make sure no extra fields added to model 
+        for field_name, field_info in cls.model_fields.items():
+            if field_name not in BaseComputeUnit.model_fields.keys():
+                raise ValueError(f"field {field_name} is not a valid field for {cls.__name__}")
 
     @property
     def output(self) -> ComputeUnitOutput:
