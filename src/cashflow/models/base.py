@@ -9,7 +9,7 @@ import hashlib
 from pydantic import ConfigDict
 from typing import Any
 from decimal import Decimal
-
+import time
 """
 TODO:
 - hash functions 
@@ -20,6 +20,8 @@ TODO:
 """
 
 FRESHNESS_TIME_INTERVAL = 1000 # milliseconds
+class StaleDataException(Exception):
+    pass
 class FrozenModel(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -48,11 +50,13 @@ class AbstractComputeUnit(ABC, FrozenModel):
 class BaseDataElement(ABC, FrozenModel):
     input_hash: str = "" # can add an input hash per model_config or other things so don't have to hash really long time series values or dates
     _source_compute_unit: 'BaseComputeUnit' = PrivateAttr(default=None)
+    _output_created_time: datetime = PrivateAttr(default=None)
     _is_fresh: bool = PrivateAttr(default=True)
     model_config = ConfigDict(strict=True)
 
-    def set_source_compute_unit(self, source_compute_unit: 'BaseComputeUnit') -> None:
+    def set_source_compute_unit(self, source_compute_unit: 'BaseComputeUnit', output_created_time: datetime) -> None:
         self._source_compute_unit = source_compute_unit
+        self._output_created_time = output_created_time
     
     def get_source_compute_unit(self) -> 'BaseComputeUnit':
         return self._source_compute_unit
@@ -65,9 +69,14 @@ class BaseDataElement(ABC, FrozenModel):
           if not self._is_fresh:
               return False
           elif self._time_to_check_freshness():
-              self._is_fresh = self._source_compute_unit.is_fresh()
+              self._is_fresh = self._source_compute_unit.is_fresh() and self._output_created_time == self._source_compute_unit._output_created_time
           return self._is_fresh
    
+    def __getattribute__(self, name: str, /) -> Any:
+        if self.is_stale():
+            raise StaleDataException(f"data element {self.__class__.__name__} is stale")
+        return super().__getattribute__(name)
+
     def is_stale(self) -> bool:
         return not self._get_is_fresh()
 
@@ -102,12 +111,20 @@ class ModelConfig(BaseModel):
 
 
 class ComputeUnitInput(BaseModel):
-    pass # TODO: add input hash
-    
-
+    def is_fresh(self) -> bool:
+        for field_name, _ in self.model_fields.items():
+            value = getattr(self, field_name)
+            if not value.is_fresh():
+                return False
+        return True
 
 class ComputeUnitOutput(BaseModel):
-    pass  
+    def is_fresh(self) -> bool:
+        for field_name, _ in self.model_fields.items():
+            value = getattr(self, field_name)
+            if not value.is_fresh():
+                return False
+        return True
 
 class BaseComputeUnit(ABC, BaseModel):
 
@@ -120,6 +137,7 @@ class BaseComputeUnit(ABC, BaseModel):
 
     class Input(ComputeUnitInput):
         pass
+
 
     class Output(ComputeUnitOutput):
         pass
@@ -136,15 +154,9 @@ class BaseComputeUnit(ABC, BaseModel):
         if datetime.now().time() % FRESHNESS_TIME_INTERVAL == 0:
             self._is_fresh = self._get_is_fresh()
     
-    @abstractmethod
     def _get_is_fresh(self) -> bool:
-        raise NotImplementedError("must be implemented by subclass")
+        return self.input.is_fresh() and self._external_data_is_fresh()
 
-    def _inputs_are_fresh(self) -> bool:
-        for input in self.input:
-            if not input.is_fresh():
-                return False
-        return True
     def _external_data_is_fresh(self) -> bool:
         raise NotImplementedError("must be implemented by subclass")
     
@@ -162,9 +174,6 @@ class BaseComputeUnit(ABC, BaseModel):
     
     def get_dependents(self) -> list['BaseComputeUnit']:
         return self._dependents
-    
-
-
 
 
     @classmethod
@@ -278,19 +287,29 @@ class BaseComputeUnit(ABC, BaseModel):
     def output(self) -> ComputeUnitOutput:
         if self._output is None:
             self.run()
+        elif not self.is_fresh():
+            self.run()
         return self._output
 
     def run(self) -> ComputeUnitOutput:
-        t_output = self._compute_output()
-        for output_name, output_info in self.Output.model_fields.items():
-            value = getattr(t_output, output_name)
-            if issubclass(output_info.annotation, BaseDataElement):
-                value.set_source_compute_unit(self)
-            elif issubclass(output_info.annotation, BaseComputeUnit):
-                value.set_source_compute_unit(self)
-            else:
-                raise ValueError(f"field {output_name} must be a subclass of BaseDataElement or BaseComputeUnit")
-        self._output = t_output
+        max_retries = 3
+        for retry in range(max_retries):
+            try:
+                t_output = self._compute_output()
+                self._output_created_time = datetime.now()
+                for output_name, output_info in self.Output.model_fields.items():
+                    value = getattr(t_output, output_name)
+                    if issubclass(output_info.annotation, BaseDataElement):
+                        value.set_source_compute_unit(self, self._output_created_time)
+                    elif issubclass(output_info.annotation, BaseComputeUnit):
+                        value.set_source_compute_unit(self, self._output_created_time)
+                    else:
+                        raise ValueError(f"field {output_name} must be a subclass of BaseDataElement or BaseComputeUnit")
+                self._output = t_output
+            except StaleDataException as e:
+                if retry == max_retries - 1:
+                    raise e
+                time.sleep(1)
 
     def _compute_output(self) -> ComputeUnitOutput:
         raise NotImplementedError("must be implemented by subclass")
