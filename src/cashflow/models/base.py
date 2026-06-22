@@ -8,6 +8,7 @@ from functools import cached_property
 import hashlib
 from pydantic import ConfigDict
 from typing import Any
+from decimal import Decimal
 
 """
 TODO:
@@ -17,6 +18,8 @@ TODO:
 --....... not much else ! 
 
 """
+
+FRESHNESS_TIME_INTERVAL = 1000 # milliseconds
 class FrozenModel(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -45,21 +48,40 @@ class AbstractComputeUnit(ABC, FrozenModel):
 class BaseDataElement(ABC, FrozenModel):
     input_hash: str = "" # can add an input hash per model_config or other things so don't have to hash really long time series values or dates
     _source_compute_unit: 'BaseComputeUnit' = PrivateAttr(default=None)
+    _is_fresh: bool = PrivateAttr(default=True)
+    model_config = ConfigDict(strict=True)
 
     def set_source_compute_unit(self, source_compute_unit: 'BaseComputeUnit') -> None:
         self._source_compute_unit = source_compute_unit
     
     def get_source_compute_unit(self) -> 'BaseComputeUnit':
         return self._source_compute_unit
+        
+    def _time_to_check_freshness(self) -> None:
+        if datetime.now().time() % FRESHNESS_TIME_INTERVAL == 0:
+            self._is_fresh = self._get_is_fresh()
+
+    def _get_is_fresh(self) -> bool:
+          if not self._is_fresh:
+              return False
+          elif self._time_to_check_freshness():
+              self._is_fresh = self._source_compute_unit.is_fresh()
+          return self._is_fresh
+   
+    def is_stale(self) -> bool:
+        return not self._get_is_fresh()
 
     def hash(self) -> str:
         if self.input_hash:
             return self.input_hash
         else:
             return hashlib.sha256(str(self.model_dump()).encode()).hexdigest()
-class TimeSeries(BaseDataElement):
-    values: list[float]
-    dates: list[datetime]
+
+class IndexedSeries(BaseDataElement):
+    values: list[float | int | Decimal | str]
+    index: list[float | int | Decimal | str]
+class TimeSeries(IndexedSeries):
+    index: list[datetime]
 
 class Scalar(BaseDataElement):
     value: float | int | bool | str
@@ -110,6 +132,27 @@ class BaseComputeUnit(ABC, BaseModel):
         memory_address = id(self)
         return f"{self.__class__.__name__}_{memory_address}"
 
+    def _time_to_check_freshness(self) -> None:
+        if datetime.now().time() % FRESHNESS_TIME_INTERVAL == 0:
+            self._is_fresh = self._get_is_fresh()
+    
+    @abstractmethod
+    def _get_is_fresh(self) -> bool:
+        raise NotImplementedError("must be implemented by subclass")
+
+    def _inputs_are_fresh(self) -> bool:
+        for input in self.input:
+            if not input.is_fresh():
+                return False
+        return True
+    def _external_data_is_fresh(self) -> bool:
+        raise NotImplementedError("must be implemented by subclass")
+    
+    def is_fresh(self) -> bool:
+        return self._get_is_fresh()
+
+    def is_stale(self) -> bool:
+        return not self.is_fresh()
 
     def set_source_compute_unit(self, source_compute_unit: 'BaseComputeUnit') -> None:
         self._source_compute_unit = source_compute_unit
@@ -287,6 +330,16 @@ class BaseComputeUnit(ABC, BaseModel):
         _render_registry(reg, path)
         return path
 
+class DataAccessMixin(ABC):
+    @abstractmethod
+    def _external_data_is_fresh(self) -> bool:
+        raise NotImplementedError("must be implemented by subclass")
+    
+    def is_fresh(self) -> bool:
+        return self._external_data_is_fresh() and self._inputs_are_fresh()
+
+
+    
 
 
 
