@@ -17,6 +17,43 @@ food:
 
 end_of_month_savings
 
+
+class Node(BaseComputeUnit):
+    input: Input
+    output: Output
+
+    class Input(BaseComputeUnitInput):
+         input_1: Node
+         input_2: list[Node]
+
+    class Output(BaseComputeUnitOutput):
+        output_1: BaseDataElement
+        output_2: list[BaseDataElement]
+         
+
+    
+my_node = Node(
+     input=Node.Input(
+         input_1=
+         input_2=[]
+         )
+      output=Node.Output(
+          output_1=BaseDataElement(value=100),
+          output_2=[]
+          )
+    )
+
+
+class Submodule(BaseComputeUnit):
+    class Input(BaseComputeUnitInput):
+        input_1: Submodule  
+        input_2: list[Submodule]
+    class Output(BaseComputeUnitOutput):
+        output_1: Node
+        output_2: list[Node]
+        output_3: Submodule
+        output_4: list[Submodule]
+
 """
 
 
@@ -29,6 +66,10 @@ from pydantic import BaseModel
 
 
 TAX_RATE = 0.2
+
+
+
+
 
 class JobIncomeNode(Layers.Node):
     class Output(ComputeUnitOutput):
