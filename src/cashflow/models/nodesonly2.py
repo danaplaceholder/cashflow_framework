@@ -11,8 +11,9 @@ class Fingerprint(BaseModel):
     value: str
     _timestamp: float = PrivateAttr(default=time.time())
     def is_less_than_100ms_old(self) -> bool:
-        fingerprint_age = self._timestamp - time.time()
+        fingerprint_age = time.time() - self._timestamp
         if fingerprint_age < 0.1:
+            print(f"Fingerprint is less than 100ms old: {fingerprint_age}")
             return True
         else:
             print(f"Fingerprint is not less than 100ms old: {fingerprint_age}")
@@ -47,9 +48,11 @@ class BaseGraphElement(BaseModel):
         self.set_status(ElementStatus.CREATED)
     
     def set_status(self, status: ElementStatus) -> None:
+        if self._status == status:
+            return
         self._status = status
         # render the graph with the new status
-        if status in [ElementStatus.CREATED, ElementStatus.COMPUTING_OUTPUT, ElementStatus.COMPLETED, ElementStatus.DELETED]:
+        if status in [ElementStatus.CREATED, ElementStatus.COMPUTING_OUTPUT, ElementStatus.COMPLETED, ElementStatus.DELETED, ElementStatus.WAITING_FOR_INPUT]:
             build_graph(self.root_node())
 
     def config_hash(self) -> str:
@@ -121,12 +124,17 @@ class BaseGraphElement(BaseModel):
     @property
     def output(self) -> Output:
         if not self.should_exist():
+            return None
             raise ValueError(f"Node {self.config_hash()} of class {self.__class__.__name__} should not exist")
         if self._output is None:
-            self._output = self._outer_compute_output()
+            print(f"-----like 123 here?-----")
             self._last_input_fingerprint = self.recursive_input_fingerprint()
+            self._output = self._outer_compute_output()
         elif self.should_recompute_output():
+            print(f"-----like 456 here?-----")
             self._output.update(self._outer_compute_output())
+        else:
+            self.set_status(ElementStatus.COMPLETED)
         return self._output
 
     def identity_key(self) -> str:
@@ -150,9 +158,8 @@ class BaseGraphElement(BaseModel):
             return self._last_input_fingerprint
         else:
             print(f"-------------------------------- getting new input fingerprint for {self.element_name()} --------------------------------")
-            self.set_status(ElementStatus.WAITING_FOR_INPUT)
             next_input_fingerprint = self.input.recursive_input_fingerprint()
-            self.set_status(ElementStatus.COMPLETED)
+
             return next_input_fingerprint
     
     def set_input(self, new_input: Input) -> None:
@@ -162,24 +169,28 @@ class BaseGraphElement(BaseModel):
     def recursive_output_fingerprint(self) -> str:        
         
         fingerprint_dict = {}
-        for field_name, field_info in self.output.__class__.model_fields.items():
-            if isinstance(getattr(self.output, field_name), list) and issubclass(getattr(self.output, field_name)[0].__class__, BaseGraphElement):
-                fingerprint_dict[field_name] = {item.recursive_output_fingerprint() for item in getattr(self.output, field_name)}
-            elif isinstance(getattr(self.output, field_name), BaseGraphElement):
-                fingerprint_dict[field_name] = getattr(self.output, field_name).recursive_output_fingerprint()
-            elif isinstance(getattr(self.output, field_name), list) and issubclass(getattr(self.output, field_name)[0].__class__, BaseDataElement):
-                fingerprint_dict[field_name] = {item.recursive_output_fingerprint() for item in getattr(self.output, field_name)}
-            elif isinstance(getattr(self.output, field_name), BaseDataElement):
-                fingerprint_dict[field_name] = getattr(self.output, field_name).recursive_output_fingerprint()
+        output = self.output
+        if output is None:
+            return "NONE"
+        for field_name, field_info in output.__class__.model_fields.items():
+            if isinstance(getattr(output, field_name), list) and issubclass(getattr(output, field_name)[0].__class__, BaseGraphElement):
+                fingerprint_dict[field_name] = {item.recursive_output_fingerprint() for item in getattr(output, field_name)}
+            elif isinstance(getattr(output, field_name), BaseGraphElement):
+                fingerprint_dict[field_name] = getattr(output, field_name).recursive_output_fingerprint()
+            elif isinstance(getattr(output, field_name), list) and issubclass(getattr(output, field_name)[0].__class__, BaseDataElement):
+                fingerprint_dict[field_name] = {item.recursive_output_fingerprint() for item in getattr(output, field_name)}
+            elif isinstance(getattr(output, field_name), BaseDataElement):
+                fingerprint_dict[field_name] = getattr(output, field_name).recursive_output_fingerprint()
             else:
-                fingerprint_dict[field_name] = str(getattr(self.output, field_name))
+                fingerprint_dict[field_name] = str(getattr(output, field_name))
         return str(fingerprint_dict)
     def should_exist(self) -> bool:
-        # TODO: implement this
-        self.set_status(ElementStatus.CHECKING_IF_SHOULD_EXIST)
-        return self.created_by is None or self.created_by.output.contains(self)
+        if self._status == ElementStatus.DELETED:
+            return False
+        else:
+            return self.created_by is None or self.created_by.output.contains(self)
+        
     def should_recompute_output(self) -> bool:
-        self.set_status(ElementStatus.CHECKING_IF_SHOULD_RECOMPUTE_OUTPUT)
         # TODO: implement this
         latest_input_fingerprint = self.recursive_input_fingerprint()
         if self._output is None or self._last_input_fingerprint != latest_input_fingerprint:
@@ -187,6 +198,8 @@ class BaseGraphElement(BaseModel):
         else:
             should_recompute = False
         self._last_input_fingerprint = latest_input_fingerprint
+        print(F"------------------------self._last_input_fingerprint: {self._last_input_fingerprint}------------------------")
+        print(F"------------------------latest_input_fingerprint: {latest_input_fingerprint}------------------------")
         return should_recompute
 class BaseDataElement(BaseModel):
     def recursive_output_fingerprint(self) -> str:
@@ -214,12 +227,16 @@ class SymbolTradeAnalysis(BaseDataElement):
 
 class SymbolConfig(BaseGraphElement.GraphElementConfig):
     symbol: str
-
-class GetAllTradesNode(BaseGraphElement):
+class DataAccessNode(BaseGraphElement):
+    class Input(BaseGraphElement.Input):
+        pass
     class Output(BaseGraphElement.Output):
-        all_trades: list[Trade]
+        pass
     def _compute_output(self) -> Output:
-        return self.Output(all_trades=[
+        pass
+
+
+TRADES_IN_DB_1 = {"last_modified": 1, "trades": [ 
             Trade(symbol="AAPL", trade_id="1", direction="Buy", volume=100, price=150.75),
             Trade(symbol="AAPL", trade_id="2", direction="Sell", volume=50, price=152.25),
             Trade(symbol="AAPL", trade_id="3", direction="Buy", volume=75, price=151.50),
@@ -239,9 +256,34 @@ class GetAllTradesNode(BaseGraphElement):
             Trade(symbol="TSLA", trade_id="17", direction="Buy", volume=150, price=169.25),
             Trade(symbol="TSLA", trade_id="18", direction="Sell", volume=75, price=170.50),
             Trade(symbol="TSLA", trade_id="19", direction="Buy", volume=100, price=171.75),
-        ])
+        ]}
+TRADES_IN_DB_2 = {"last_modified": 2, "trades": [
+    Trade(symbol="AAPL", trade_id="1", direction="Buy", volume=100, price=150.75),
+    Trade(symbol="AAPL", trade_id="2", direction="Sell", volume=50, price=152.25),
+    Trade(symbol="AAPL", trade_id="3", direction="Buy", volume=75, price=151.50),
+    Trade(symbol="AAPL", trade_id="4", direction="Sell", volume=25, price=153.00),
+    Trade(symbol="AAPL", trade_id="5", direction="Buy", volume=125, price=154.25),
+    Trade(symbol="AAPL", trade_id="6", direction="Sell", volume=100, price=155.50),
+    Trade(symbol="AAPL", trade_id="7", direction="Buy", volume=150, price=156.75),
+    Trade(symbol="AAPL", trade_id="8", direction="Sell", volume=75, price=158.00),
+    Trade(symbol="AAPL", trade_id="9", direction="Buy", volume=100, price=159.25),
+    Trade(symbol="AAPL", trade_id="10", direction="Sell", volume=50, price=160.50),
+]}
+class GetAllTradesNode(DataAccessNode):
+    _last_modified: int = PrivateAttr(default=TRADES_IN_DB_1["last_modified"])
+    class Output(BaseGraphElement.Output):
+        all_trades: list[Trade]
+    def _compute_output(self) -> Output:
+        output = self.Output(all_trades=TRADES_IN_DB_1["trades"])
+        self._last_modified = TRADES_IN_DB_1["last_modified"]
+        return output
 
-class GetAllYesterdayPositionsNode(BaseGraphElement):
+    def should_recompute_output(self) -> bool:
+        if self._last_modified != TRADES_IN_DB_1["last_modified"]:
+            return True
+        else:
+            return False
+class GetAllYesterdayPositionsNode(DataAccessNode):
     class Output(BaseGraphElement.Output):
         all_yesterday_positions: list[Position]
     def _compute_output(self) -> Output:
@@ -249,7 +291,7 @@ class GetAllYesterdayPositionsNode(BaseGraphElement):
             Position(symbol="AAPL", position=100),
             Position(symbol="TSLA", position=50),
         ])
-class GetAllSymbolOntologyNode(BaseGraphElement):
+class GetAllSymbolOntologyNode(DataAccessNode):
     class Output(BaseGraphElement.Output):
         all_symbol_ontology: list[SymbolOntology]
     def _compute_output(self) -> Output:
@@ -397,15 +439,50 @@ class TradeAnalysisNode(BaseGraphElement):
 color_key_legend = {}
 color_key_legend[ElementStatus.CREATED] = "#888780"
 color_key_legend[ElementStatus.CHECKING_IF_SHOULD_EXIST] = "#d3d2cb"
-color_key_legend[ElementStatus.CHECKING_IF_SHOULD_RECOMPUTE_OUTPUT] = "#55544d"
+# light blue
+color_key_legend[ElementStatus.CHECKING_IF_SHOULD_RECOMPUTE_OUTPUT] = "#a0e6e6"
 color_key_legend[ElementStatus.COMPUTING_OUTPUT] = "#f9c74f"
 color_key_legend[ElementStatus.UPDATING_OUTPUT] = "#577590"
 color_key_legend[ElementStatus.WAITING_FOR_INPUT] = "#f8961e"
 color_key_legend[ElementStatus.COMPLETED] = "#90be6d"
 color_key_legend[ElementStatus.DELETED] = "#f94144"
+color_black = "#000000"
+color_cluster_fill = "#F1EFE8"
 
-def get_color_for_status(status: ElementStatus) -> str:
+def _parse_status(name: str) -> ElementStatus:
+    return ElementStatus(name.rsplit("_STATUS_", 1)[-1])
+
+def get_color_for_status(status: ElementStatus | str) -> str:
+    if not isinstance(status, ElementStatus):
+        status = ElementStatus(status)
     return color_key_legend[status]
+
+def _node_attrs(name: str) -> dict:
+    return dict(
+        shape="box",
+        style="rounded,filled,bold",
+        fontname="Helvetica",
+        fontsize="11",
+        margin="0.18,0.10",
+        fillcolor=get_color_for_status(_parse_status(name)),
+        color=color_black,
+        penwidth="2",
+    )
+
+def _default_node_attrs() -> dict:
+    attrs = _node_attrs(f"x_STATUS_{ElementStatus.CREATED.value}")
+    return attrs
+
+def _cluster_attrs(name: str) -> dict:
+    return dict(
+        style="rounded,filled,bold",
+        fillcolor=color_cluster_fill,
+        color=color_black,
+        penwidth="2",
+        fontname="Helvetica",
+        fontsize="12",
+        labeljust="l",
+    )
 
 def build(nodes, contains, edges, filename="graph",
           rankdir="LR", engine="dot", ranksep="0.9", nodesep="0.4"):
@@ -413,9 +490,7 @@ def build(nodes, contains, edges, filename="graph",
     g = graphviz.Digraph("g", format="svg", engine=engine)
     g.attr(rankdir=rankdir, compound="true", splines="spline",
            nodesep=nodesep, ranksep=ranksep, newrank="true")
-    g.attr("node", shape="box", style="rounded,filled",
-           fontname="Helvetica", fontsize="11", penwidth="0.6",
-           color=get_color_for_status(ElementStatus.CREATED), fillcolor="#ffffff", margin="0.18,0.10")
+    g.attr("node", **_default_node_attrs())
     
 
     container_ids = {cid for cid, kids in contains.items() if kids}
@@ -427,14 +502,13 @@ def build(nodes, contains, edges, filename="graph",
 
     def emit(parent_graph, cid):
         with parent_graph.subgraph(name=f"cluster_{cid}") as c:
-            c.attr(label=nodes.get(cid, cid), style="rounded,filled",
-                   fillcolor="#f1efe8", color="#888780",
-                   fontname="Helvetica", fontsize="12", labeljust="l")
+            c.attr("node", **_default_node_attrs())
+            c.attr(label=nodes.get(cid, cid), **_cluster_attrs(cid))
             for child in contains[cid]:
                 if child in container_ids:
                     emit(c, child)
                 else:
-                    c.node(child, nodes.get(child, child))
+                    c.node(child, nodes.get(child, child), **_node_attrs(child))
 
     nested = {ch for kids in contains.values() for ch in kids}
     for cid in container_ids:
@@ -444,7 +518,7 @@ def build(nodes, contains, edges, filename="graph",
     placed = nested | container_ids
     for nid, label in nodes.items():
         if nid not in placed:
-            g.node(nid, label, color=get_color_for_status(label.split("_STATUS_")[1]))
+            g.node(nid, label, **_node_attrs(nid))
     for src, dst in edges:
         kw = {"color": "#888780", "penwidth": "0.8", "arrowsize": "0.7"}
         s, d = src, dst
@@ -497,4 +571,10 @@ def build_graph(node: BaseGraphElement):
 if __name__ == "__main__":
     trade_analysis_node = TradeAnalysisNode()
     firm_economics_node = trade_analysis_node.output.firm_economics_node.output.firm_economics
-    build_graph(node=trade_analysis_node)
+    time.sleep(1)
+    print(f"HEYYYYY")
+    TRADES_IN_DB_1 = TRADES_IN_DB_2
+    firm_economics_output_2 = trade_analysis_node.output.firm_economics_node.output.firm_economics
+
+
+
