@@ -52,7 +52,7 @@ class BaseGraphElement(BaseModel):
             return
         self._status = status
         # render the graph with the new status
-        if status in [ElementStatus.CREATED, ElementStatus.COMPUTING_OUTPUT, ElementStatus.COMPLETED, ElementStatus.DELETED, ElementStatus.WAITING_FOR_INPUT]:
+        if status in [ElementStatus.CREATED, ElementStatus.COMPUTING_OUTPUT, ElementStatus.COMPLETED, ElementStatus.DELETED, ElementStatus.WAITING_FOR_INPUT, ElementStatus.CHECKING_IF_SHOULD_RECOMPUTE_OUTPUT]:
             build_graph(self.root_node())
 
     def config_hash(self) -> str:
@@ -97,28 +97,6 @@ class BaseGraphElement(BaseModel):
             if type(self) != type(new_output):
                 raise ValueError(f"new_output must be of type {type(self)}")
             for field_name, field_info in self.__class__.model_fields.items():
-                old_value = getattr(self, field_name)
-                new_value = getattr(new_output, field_name)
-                if isinstance(old_value, list) and issubclass(old_value[0].__class__, BaseGraphElement):
-                    old_dict = {item.identity_key(): item for item in old_value}
-                    new_dict = {item.identity_key(): item for item in new_value}
-                    updated_list = []
-                    for id_key in set(new_dict.keys()) | set(old_dict.keys()):
-                        if id_key in new_dict:
-                            if id_key not in old_dict:
-                                updated_list.append(new_dict[id_key])
-                            elif old_dict[id_key].input != new_dict[id_key].input: # any change in input... coming from diff instances of the same node.... should make us use the new instance
-                                old_dict[id_key].set_input(new_dict[id_key].input) # hook up new input to old node 
-                                updated_list.append(old_dict[id_key])
-                            else:
-                                updated_list.append(old_dict[id_key])
-                        else:
-                            old_dict[id_key].set_status(ElementStatus.DELETED)
-                    setattr(self, field_name, updated_list)
-                elif isinstance(old_value, BaseGraphElement):
-                    if old_value.input != new_value.input:
-                        old_value.set_input(new_value.input) # hook up new input to old node 
-                else:
                     setattr(self, field_name, getattr(new_output, field_name))
 
     @property
@@ -133,8 +111,7 @@ class BaseGraphElement(BaseModel):
         elif self.should_recompute_output():
             print(f"-----like 456 here?-----")
             self._output.update(self._outer_compute_output())
-        else:
-            self.set_status(ElementStatus.COMPLETED)
+        self.set_status(ElementStatus.COMPLETED)
         return self._output
 
     def identity_key(self) -> str:
@@ -157,6 +134,7 @@ class BaseGraphElement(BaseModel):
         elif self._last_input_fingerprint is not None and self._last_input_fingerprint.is_less_than_100ms_old():
             return self._last_input_fingerprint
         else:
+            self.set_status(ElementStatus.WAITING_FOR_INPUT)
             print(f"-------------------------------- getting new input fingerprint for {self.element_name()} --------------------------------")
             next_input_fingerprint = self.input.recursive_input_fingerprint()
 
@@ -197,6 +175,7 @@ class BaseGraphElement(BaseModel):
             should_recompute = True
         else:
             should_recompute = False
+
         self._last_input_fingerprint = latest_input_fingerprint
         print(F"------------------------self._last_input_fingerprint: {self._last_input_fingerprint}------------------------")
         print(F"------------------------latest_input_fingerprint: {latest_input_fingerprint}------------------------")
