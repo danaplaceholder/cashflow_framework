@@ -105,13 +105,10 @@ class BaseGraphElement(BaseModel):
             return None
             raise ValueError(f"Node {self.config_hash()} of class {self.__class__.__name__} should not exist")
         if self._output is None:
-            print(f"-----like 123 here?-----")
             self._last_input_fingerprint = self.recursive_input_fingerprint()
             self._output = self._outer_compute_output()
         elif self.should_recompute_output():
-            print(f"-----like 456 here?-----")
             self._output.update(self._outer_compute_output())
-        self.set_status(ElementStatus.COMPLETED)
         return self._output
 
     def identity_key(self) -> str:
@@ -122,6 +119,7 @@ class BaseGraphElement(BaseModel):
 
     def _compute_output(self) -> Output:
         pass
+
     def _outer_compute_output(self) -> Output:
         self.set_status(ElementStatus.COMPUTING_OUTPUT)
         computed_output = self._compute_output()
@@ -134,8 +132,6 @@ class BaseGraphElement(BaseModel):
         elif self._last_input_fingerprint is not None and self._last_input_fingerprint.is_less_than_100ms_old():
             return self._last_input_fingerprint
         else:
-            self.set_status(ElementStatus.WAITING_FOR_INPUT)
-            print(f"-------------------------------- getting new input fingerprint for {self.element_name()} --------------------------------")
             next_input_fingerprint = self.input.recursive_input_fingerprint()
 
             return next_input_fingerprint
@@ -177,8 +173,6 @@ class BaseGraphElement(BaseModel):
             should_recompute = False
 
         self._last_input_fingerprint = latest_input_fingerprint
-        print(F"------------------------self._last_input_fingerprint: {self._last_input_fingerprint}------------------------")
-        print(F"------------------------latest_input_fingerprint: {latest_input_fingerprint}------------------------")
         return should_recompute
 class BaseDataElement(BaseModel):
     def recursive_output_fingerprint(self) -> str:
