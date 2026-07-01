@@ -30,6 +30,7 @@ class ElementStatus(StrEnum):
     DELETED = "deleted"
 
 class BaseGraphElement(BaseModel):
+    # TODO Caching layer ? 
 
     _status: ElementStatus = PrivateAttr(default=ElementStatus.CREATED)
     config: 'BaseGraphElement.GraphElementConfig' = Field(default=None)
@@ -97,6 +98,7 @@ class BaseGraphElement(BaseModel):
             if type(self) != type(new_output):
                 raise ValueError(f"new_output must be of type {type(self)}")
             for field_name, field_info in self.__class__.model_fields.items():
+                    # TODO: identify which nodes don't actually need to be overwritten ... 
                     setattr(self, field_name, getattr(new_output, field_name))
 
     @property
@@ -107,7 +109,7 @@ class BaseGraphElement(BaseModel):
         if self._output is None:
             self._last_input_fingerprint = self.recursive_input_fingerprint()
             self._output = self._outer_compute_output()
-        elif self.should_recompute_output():
+        elif self._outer_should_recompute_output():
             self._output.update(self._outer_compute_output())
         return self._output
 
@@ -164,8 +166,13 @@ class BaseGraphElement(BaseModel):
         else:
             return self.created_by is None or self.created_by.output.contains(self)
         
-    def should_recompute_output(self) -> bool:
+    def _inner_should_recompute_output(self) -> bool:
         # TODO: implement this
+        return False
+    def _outer_should_recompute_output(self) -> bool:
+        # TODO: implement this
+        if self._inner_should_recompute_output():
+            return True
         latest_input_fingerprint = self.recursive_input_fingerprint()
         if self._output is None or self._last_input_fingerprint != latest_input_fingerprint:
             should_recompute = True
@@ -242,6 +249,24 @@ TRADES_IN_DB_2 = {"last_modified": 2, "trades": [
     Trade(symbol="AAPL", trade_id="9", direction="Buy", volume=100, price=159.25),
     Trade(symbol="AAPL", trade_id="10", direction="Sell", volume=50, price=160.50),
 ]}
+
+ALL_SYMBOL_ONTOLOGY_1 = {"symbol_ontology": [
+            SymbolOntology(symbol="AAPL", symbol_type="stock_1", symbol_category="CAT_TECH"),
+            SymbolOntology(symbol="TSLA", symbol_type="stock_2", symbol_category="CAT_AUTOMOTIVE"),
+            SymbolOntology(symbol="SOME_OTHER_SYMBOL", symbol_type="option_1", symbol_category="CAT_TECH"),
+        ], "last_modified": 1}
+
+ALL_SYMBOL_ONTOLOGY_2 = {"symbol_ontology": [
+            SymbolOntology(symbol="AAPL", symbol_type="stock_1", symbol_category="CAT_TECH"),
+            SymbolOntology(symbol="TSLA", symbol_type="stock_3", symbol_category="XCAT_AUTOMOTIVE"),
+            SymbolOntology(symbol="SOME_OTHER_SYMBOL", symbol_type="option_2", symbol_category="CAT_TECH"),
+        ], "last_modified": 2}
+
+ALL_SYMBOL_ONTOLOGY_3 = {"symbol_ontology": [
+            SymbolOntology(symbol="AAPL", symbol_type="stock_1", symbol_category="CAT_TECH"),
+            SymbolOntology(symbol="TSLA", symbol_type="stock_4", symbol_category="XCAT_AUTOMOTIVE"),
+            SymbolOntology(symbol="SOME_OTHER_SYMBOL", symbol_type="option_2", symbol_category="CAT_TECH"),
+        ], "last_modified": 3}
 class GetAllTradesNode(DataAccessNode):
     _last_modified: int = PrivateAttr(default=TRADES_IN_DB_1["last_modified"])
     class Output(BaseGraphElement.Output):
@@ -251,7 +276,7 @@ class GetAllTradesNode(DataAccessNode):
         self._last_modified = TRADES_IN_DB_1["last_modified"]
         return output
 
-    def should_recompute_output(self) -> bool:
+    def _inner_should_recompute_output(self) -> bool:
         if self._last_modified != TRADES_IN_DB_1["last_modified"]:
             return True
         else:
@@ -265,15 +290,16 @@ class GetAllYesterdayPositionsNode(DataAccessNode):
             Position(symbol="TSLA", position=50),
         ])
 class GetAllSymbolOntologyNode(DataAccessNode):
+    _last_modified: int = PrivateAttr(default=ALL_SYMBOL_ONTOLOGY_1["last_modified"])
     class Output(BaseGraphElement.Output):
         all_symbol_ontology: list[SymbolOntology]
     def _compute_output(self) -> Output:
-        return self.Output(all_symbol_ontology=[
-            SymbolOntology(symbol="AAPL", symbol_type="stock_1", symbol_category="CAT_TECH"),
-            SymbolOntology(symbol="TSLA", symbol_type="stock_2", symbol_category="CAT_AUTOMOTIVE"),
-            SymbolOntology(symbol="SOME_OTHER_SYMBOL", symbol_type="option_1", symbol_category="CAT_TECH"),
-        ])
-
+        return self.Output(all_symbol_ontology=ALL_SYMBOL_ONTOLOGY_1["symbol_ontology"])
+    def _inner_should_recompute_output(self) -> bool:
+        if self._last_modified != ALL_SYMBOL_ONTOLOGY_1["last_modified"]:
+            return True
+        else:
+            return False
 
 class GetSymbolOntologyNode(BaseGraphElement):
     config: SymbolConfig
@@ -545,9 +571,18 @@ if __name__ == "__main__":
     trade_analysis_node = TradeAnalysisNode()
     firm_economics_node = trade_analysis_node.output.firm_economics_node.output.firm_economics
     time.sleep(1)
+
     print(f"HEYYYYY")
+    # change TSLA
+    ALL_SYMBOL_ONTOLOGY_1 = ALL_SYMBOL_ONTOLOGY_2
+    firm_economics_output_2 = trade_analysis_node.output.firm_economics_node.output.firm_economics
+    time.sleep(1)
+    # RM TSLA
     TRADES_IN_DB_1 = TRADES_IN_DB_2
     firm_economics_output_2 = trade_analysis_node.output.firm_economics_node.output.firm_economics
-
+    time.sleep(1)
+    # CHANGE TSLA again
+    ALL_SYMBOL_ONTOLOGY_1 = ALL_SYMBOL_ONTOLOGY_3
+    firm_economics_output_3 = trade_analysis_node.output.firm_economics_node.output.firm_economics  
 
 
