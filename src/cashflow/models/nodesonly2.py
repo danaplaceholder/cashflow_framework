@@ -77,7 +77,33 @@ class BaseGraphElement(BaseModel):
                 else:
                     all_fields_fingerprints.append(str(value))
             return Fingerprint(value=f''.join(all_fields_fingerprints))
+        def update(self, new_input: 'BaseGraphElement.Input') -> None:
+            """
+            Simpler than updating output. We won't delete any nodes we just make sure we are pointing to the correct nodes per identity keys
+            """
+            for field_name, _ in self.__class__.model_fields.items():
+                old_input_value = getattr(self, field_name)
+                new_input_value = getattr(new_input, field_name)
 
+                if isinstance(old_input_value, list):
+                    if len(old_input_value) and issubclass(old_input_value[0].__class__, BaseGraphElement) or len(new_input_value) and issubclass(new_input_value[0].__class__, BaseGraphElement):
+                        old_dict = {item.identity_key(): item for item in old_input_value}
+                        new_dict = {item.identity_key(): item for item in new_input_value}
+                        updated_list = []
+                        for key, _ in new_dict.items():
+                            if key in old_dict:
+                                updated_list.append(old_dict[key])
+                            else:
+                                updated_list.append(new_dict[key])
+                            # leave things as is if old_dict has the key but new_dict does not.... just cause a node is no longer in our output, doesn't mean we should delete it from the graph
+                        setattr(self, field_name, updated_list)
+                elif issubclass(old_input_value.__class__, BaseGraphElement):
+                    if old_input_value.identity_key() == new_input_value.identity_key():
+                        # do nothing 
+                        pass
+                    else:
+                        setattr(self, field_name, new_input_value)
+                
     class Output(BaseModel):
         def contains(self, node: 'BaseGraphElement') -> bool:
             for field_name, _ in self.__class__.model_fields.items():
@@ -105,7 +131,7 @@ class BaseGraphElement(BaseModel):
                             for key, _ in new_dict.items():
                                 if key in old_dict:
                                     updated_old_value = old_dict[key]
-                                    updated_old_value.set_input(new_dict[key].input)
+                                    updated_old_value.input.update(new_dict[key].input)
                                     updated_list.append(updated_old_value)
                                 else:
                                     updated_list.append(new_dict[key])
@@ -117,7 +143,7 @@ class BaseGraphElement(BaseModel):
                             setattr(self, field_name, new_value)
                     elif issubclass(old_value.__class__, BaseGraphElement):
                         if old_value.identity_key() == new_value.identity_key():
-                            old_value.set_input(new_value.input)
+                          old_value.input.update(new_value.input)
                         else:
                             old_value.set_status_deleted()
                             setattr(self, field_name, new_value)
