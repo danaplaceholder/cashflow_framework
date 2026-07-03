@@ -7,9 +7,36 @@ import time
 import graphviz
 from enum import StrEnum
 
+"""
+TODO: 
+1. epoch verification of freshness 
+also 
+1. Verification-order early exit. Early cutoff on values is table stakes; the subtler one is bailing mid-verification. If a node demanded A then B then C last run, and A's hash already mismatches, do you stop — without ever demanding B and C? Matters because demanding them isn't free: verification recursively brings them up to date first. A naive "check all recorded deps" verifier does a full subtree of work to confirm what the first hash already told you.
+2. The aliasing hazard. When two consumers demand the same node, do they get the same live object? If yes: a node that mutates a demanded DataFrame in place silently corrupts its sibling and the cached value — and worse, the cached value-hash was computed pre-mutation, so verification will happily vouch for a value that no longer matches its own fingerprint. Mine has this bug. Does yours? (Defensive copies, freezing, or hash-on-read all fix it, each with a different cost.)
+3. Identity across process death. Pydantic BaseModel gives you great in-process structure, but the question is whether Cell(rate=0.05) constructed next Tuesday resolves to the same durable key as today's — with what happens to that key when you refactor the class but the semantics don't change. Source-hashing over-invalidates on refactors; class-name keys under-invalidate on logic changes. Whichever you chose, you chose a failure mode. Which one?
+
+"""
+class GraphEpoch(BaseModel):
+    graph_hash: int
+    epoch_number: int
+    _timestamp: float = PrivateAttr(default=time.time())
+
 class Fingerprint(BaseModel):
     value: str
     _timestamp: float = PrivateAttr(default=time.time())
+    epoch_dict: dict[int, GraphEpoch] = PrivateAttr(default={})
+
+    def __init__(self, value: str, epoch_dicts: list[dict[int, GraphEpoch]]):
+        # validate the epoch dicts have the save values for the same keys 
+        all_keys = set()
+        for epoch_dict in epoch_dicts:
+            all_keys.update(epoch_dict.keys())
+        for key in all_keys:
+            all_values = [epoch_dict[key] for epoch_dict in epoch_dicts if key in epoch_dict]
+            if len(set(all_values)) != 1:
+                raise ValueError(f"Epoch dicts have different values for key {key}")
+        self.epoch_dict = {key: epoch_dict[key] for key in all_keys}
+
     def is_less_than_100ms_old(self) -> bool:
         fingerprint_age = time.time() - self._timestamp
         if fingerprint_age < 0.01:
@@ -29,12 +56,12 @@ class ElementStatus(StrEnum):
 
 class BaseGraphElement(BaseModel):
     # TODO Caching layer ? 
-
     _status: ElementStatus = PrivateAttr(default=ElementStatus.CREATED)
     config: 'BaseGraphElement.GraphElementConfig' = Field(default=None)
     input: 'BaseGraphElement.Input' = Field(default=None)
     _output: 'BaseGraphElement.Output' = PrivateAttr(default=None)
     _last_input_fingerprint: Fingerprint = PrivateAttr(default=None)
+    _last_output_fingerprint: Fingerprint = PrivateAttr(default=None)
     created_by: 'BaseGraphElement' = None
 
     def root_node(self) -> 'BaseGraphElement':
@@ -76,7 +103,7 @@ class BaseGraphElement(BaseModel):
                     all_fields_fingerprints.append(value.recursive_output_fingerprint())
                 else:
                     all_fields_fingerprints.append(str(value))
-            return Fingerprint(value=f''.join(all_fields_fingerprints))
+            return Fingerprint(value=f''.join([fingerprint.value for fingerprint in all_fields_fingerprints]), epoch_dicts=[fingerprint.epoch_dict for fingerprint in all_fields_fingerprints])
         def update(self, new_input: 'BaseGraphElement.Input') -> None:
             """
             Simpler than updating output. We won't delete any nodes we just make sure we are pointing to the correct nodes per identity keys
@@ -90,11 +117,13 @@ class BaseGraphElement(BaseModel):
                         old_dict = {item.identity_key(): item for item in old_input_value}
                         new_dict = {item.identity_key(): item for item in new_input_value}
                         updated_list = []
-                        for key, _ in new_dict.items():
-                            if key in old_dict:
+                        for key in set([k for k in old_dict.keys() ] + [k for k in new_dict.keys()]):
+                            if key in old_dict and key in new_dict:
                                 updated_list.append(old_dict[key])
-                            else:
+                            elif key in new_dict:
                                 updated_list.append(new_dict[key])
+                            else: # this is a delete
+                                pass
                             # leave things as is if old_dict has the key but new_dict does not.... just cause a node is no longer in our output, doesn't mean we should delete it from the graph
                         setattr(self, field_name, updated_list)
                 elif issubclass(old_input_value.__class__, BaseGraphElement):
@@ -105,6 +134,7 @@ class BaseGraphElement(BaseModel):
                         setattr(self, field_name, new_input_value)
                 
     class Output(BaseModel):
+        _epoch_id: int = PrivateAttr(default=0)
         def contains(self, node: 'BaseGraphElement') -> bool:
             for field_name, _ in self.__class__.model_fields.items():
                 value = getattr(self, field_name)
@@ -116,7 +146,13 @@ class BaseGraphElement(BaseModel):
                     if value.identity_key() == node.identity_key():
                         return True      
             return False
+
+        @property
+        def epoch_id(self) -> int:
+            return self._epoch_id
+
         def update(self, new_output: 'BaseGraphElement.Output') -> None:
+            has_changed = False
             if type(self) != type(new_output):
                 raise ValueError(f"new_output must be of type {type(self)}")
             for field_name, field_info in self.__class__.model_fields.items():
@@ -133,22 +169,47 @@ class BaseGraphElement(BaseModel):
                                     updated_old_value = old_dict[key]
                                     updated_old_value.input.update(new_dict[key].input)
                                     updated_list.append(updated_old_value)
+                                    # TODO: how to tell if input has changed ? 
                                 else:
                                     updated_list.append(new_dict[key])
+                                    has_changed = True
                             for key, _ in old_dict.items():
                                 if key not in new_dict:
                                     old_dict[key].set_status_deleted()
+                                    has_changed = True
                             setattr(self, field_name, updated_list)
                         else:
                             setattr(self, field_name, new_value)
+                            # TODO: how to tell if output has changed ? 
                     elif issubclass(old_value.__class__, BaseGraphElement):
                         if old_value.identity_key() == new_value.identity_key():
                           old_value.input.update(new_value.input)
+                          # TODO: how to tell if input has changed ? 
                         else:
                             old_value.set_status_deleted()
+                            has_changed = True
                             setattr(self, field_name, new_value)
                     else:
                         setattr(self, field_name, new_value)
+                        has_changed = True
+            if has_changed:
+                self._epoch_id += 1
+        def recursive_output_fingerprint(self) -> str: 
+            fingerprint_dict = {}
+            for field_name, field_info in self.__class__.model_fields.items():
+                value = getattr(self, field_name)
+                if isinstance(value, list) and issubclass(value[0].__class__, BaseGraphElement):
+                    fingerprint_dict[field_name] = {item.recursive_output_fingerprint() for item in value}
+                elif isinstance(value, BaseGraphElement):
+                    fingerprint_dict[field_name] = value.recursive_output_fingerprint()
+                elif isinstance(value, list) and issubclass(value[0].__class__, BaseDataElement):
+                    fingerprint_dict[field_name] = {item.recursive_output_fingerprint() for item in value}
+                elif isinstance(value, BaseDataElement):
+                    fingerprint_dict[field_name] = value.recursive_output_fingerprint()
+                else:
+                    fingerprint_dict[field_name] = str(value)
+            return Fingerprint(value=str(fingerprint_dict), epoch_id=self.epoch_id)
+
     @property                       
     def output(self) -> Output:
         if not self.should_exist():
@@ -164,6 +225,9 @@ class BaseGraphElement(BaseModel):
                 self._output.update( self._outer_compute_output())
             
         return self._output
+
+    def latest_valid_epoch(self) -> GraphEpoch:
+        return self._output.latest_valid_epoch()
 
     def identity_key(self) -> str:
         return self.created_by_identity_key() + self.__class__.__name__ + self.config_hash()
@@ -212,24 +276,13 @@ class BaseGraphElement(BaseModel):
         self.input = new_input
        # self._last_input_fingerprint = self.recursive_input_fingerprint()
 
-    def recursive_output_fingerprint(self) -> str:        
-        
-        fingerprint_dict = {}
+    def recursive_output_fingerprint(self) -> str:                
         output = self.output
         if output is None:
             return "NONE"
-        for field_name, field_info in output.__class__.model_fields.items():
-            if isinstance(getattr(output, field_name), list) and issubclass(getattr(output, field_name)[0].__class__, BaseGraphElement):
-                fingerprint_dict[field_name] = {item.recursive_output_fingerprint() for item in getattr(output, field_name)}
-            elif isinstance(getattr(output, field_name), BaseGraphElement):
-                fingerprint_dict[field_name] = getattr(output, field_name).recursive_output_fingerprint()
-            elif isinstance(getattr(output, field_name), list) and issubclass(getattr(output, field_name)[0].__class__, BaseDataElement):
-                fingerprint_dict[field_name] = {item.recursive_output_fingerprint() for item in getattr(output, field_name)}
-            elif isinstance(getattr(output, field_name), BaseDataElement):
-                fingerprint_dict[field_name] = getattr(output, field_name).recursive_output_fingerprint()
-            else:
-                fingerprint_dict[field_name] = str(getattr(output, field_name))
-        return str(fingerprint_dict)
+        else:
+            return output.recursive_output_fingerprint()
+
     def should_exist(self ) -> bool:
         if self._status == ElementStatus.DELETED:
             return False
@@ -270,6 +323,9 @@ class BaseGraphElement(BaseModel):
 class BaseDataElement(BaseModel):
     def recursive_output_fingerprint(self) -> str:
         return str(self)
+
+
+#------------------------------------------Example------------------------------------------
 class Trade(BaseDataElement):
     symbol: str
     trade_id: str
@@ -353,20 +409,21 @@ ALL_SYMBOL_ONTOLOGY_3 = {"symbol_ontology": [
             SymbolOntology(symbol="TSLA", symbol_type="stock_4", symbol_category="XCAT_AUTOMOTIVE"),
             SymbolOntology(symbol="SOME_OTHER_SYMBOL", symbol_type="option_2", symbol_category="CAT_TECH"),
         ], "last_modified": 3}
+
+        
 class GetAllTradesNode(DataAccessNode):
     _last_modified: int = PrivateAttr(default=TRADES_IN_DB_1["last_modified"])
     class Output(BaseGraphElement.Output):
         all_trades: list[Trade]
+
     def _compute_output(self) -> Output:
         output = self.Output(all_trades=TRADES_IN_DB_1["trades"])
         self._last_modified = TRADES_IN_DB_1["last_modified"]
         return output
 
     def _inner_should_recompute_output(self) -> bool:
-        if self._last_modified != TRADES_IN_DB_1["last_modified"]:
-            return True
-        else:
-            return False
+        return self._last_modified != TRADES_IN_DB_1["last_modified"]
+
 class GetAllYesterdayPositionsNode(DataAccessNode):
     class Output(BaseGraphElement.Output):
         all_yesterday_positions: list[Position]
@@ -446,8 +503,8 @@ class SymbolsWithActiveTradesNode(BaseGraphElement):
         get_all_trades_node: GetAllTradesNode
     class Output(BaseGraphElement.Output):
         symbol_trade_analysis_nodes: list[SymbolTradeAnalysisNode]
+
     def _compute_output(self) -> Output:
-        
         all_unique_symbols = set([trade.symbol for trade in self.input.get_all_trades_node.output.all_trades])
         symbol_trade_analysis_nodes = [
             SymbolTradeAnalysisNode(
@@ -513,6 +570,10 @@ class TradeAnalysisNode(BaseGraphElement):
             update_positions_node=update_positions_node,
             firm_economics_node=firm_economics_node)
 
+
+
+
+# -------------------------------------Visualization-------------------------------------
 #class FirmEconomicsNode(BaseGraphElement):
 #    class Input(BaseGraphElement.Input):
 #        trade_analysis_node: TradeAnalysisNode
