@@ -49,14 +49,17 @@ class FingerprintMixin:
         _fingerprint: Fingerprint = PrivateAttr(default=None)
 
         def get_fresh_recursive_fingerprint(self, identity_key: str, prefix: str) -> Fingerprint:
-            all_field_value_dict = {}
+            output_recursive_fingerprints = {}
+            input_recursive_fingerprints = {}
             for field_name, _ in self.__class__.model_fields.items():
                 value = getattr(self, field_name)
                 if isinstance(value, list):
-                    all_field_value_dict[field_name] = [item.get_fresh_output_recursive_fingerprint(identity_key = item.identity_key()) for item in value]
+                    input_recursive_fingerprints[field_name] = [item.get_fresh_input_recursive_fingerprint(identity_key = item.identity_key()) for item in value]
+                    output_recursive_fingerprints[field_name] = [item.get_fresh_output_recursive_fingerprint(identity_key = item.identity_key()) for item in value]
                 else:
-                    all_field_value_dict[field_name] = value.get_fresh_output_recursive_fingerprint(identity_key = value.identity_key())
-            return Fingerprint(field_value_dict=all_field_value_dict, identity_key= prefix + identity_key)
+                    input_recursive_fingerprints[field_name] = value.get_fresh_input_recursive_fingerprint(identity_key = value.identity_key())
+                    output_recursive_fingerprints[field_name] = value.get_fresh_output_recursive_fingerprint(identity_key = value.identity_key())
+            return Fingerprint(output_recursive_fingerprints=output_recursive_fingerprints, input_recursive_fingerprints=input_recursive_fingerprints, identity_key= prefix + identity_key)
 
 class Input(BaseModel, FingerprintMixin):
 
@@ -173,6 +176,9 @@ class BaseDataElement(BaseGraphElement, FingerprintMixin):
     def get_fresh_output_recursive_fingerprint(self, identity_key: str) -> str:
         return str(self)            
 
+    def get_fresh_input_recursive_fingerprint(self, identity_key: str) -> str:
+        return "" # TODO: this
+ 
 class BaseNode(BaseGraphElement):
     # TODO Caching layer ? 
     created_by: 'BaseNode' = None
@@ -215,17 +221,16 @@ class BaseNode(BaseGraphElement):
     @property                       
     def output(self) -> Output:
         if not self.should_exist():
-            self.should_exist(logging=True)
-            raise ValueError(f"Node {self.config_hash()} of class {self.__class__.__name__} should not exist")
-        latest_input_fingerprint = self.get_fresh_input_recursive_fingerprint(self.identity_key())
-        if self._output is None:
-            self._outer_compute_output(pre_compute_input_fingerprint=latest_input_fingerprint)
+            raise ValueError(f"Node {self.config_hash()} of class {self.__class__.__name__} should not exist. This can happen if you specifically ask for a node that has been deleted but should not happen asynchronously.")
         else:
-            should_recompute = self._outer_should_recompute_output(latest_input_fingerprint=latest_input_fingerprint)
-            if should_recompute:
+            latest_input_fingerprint = self.get_fresh_input_recursive_fingerprint(self.identity_key())
+            if self._output is None:
                 self._outer_compute_output(pre_compute_input_fingerprint=latest_input_fingerprint)
-            
-        return self._output
+            else:
+                if self._outer_should_recompute_output(latest_input_fingerprint=latest_input_fingerprint):
+                    self._outer_compute_output(pre_compute_input_fingerprint=latest_input_fingerprint)
+                
+            return self._output
 
     def identity_key(self) -> str:
         return self.created_by_identity_key() + self.__class__.__name__ + self.config_hash()
@@ -283,6 +288,13 @@ class BaseNode(BaseGraphElement):
             next_input_fingerprint = self.input.get_fresh_recursive_fingerprint(identity_key = identity_key, prefix="INPUT_")
 
             return next_input_fingerprint
+
+    def check_all_upstream_node_versions_for_current_output(self) -> bool:
+        """
+        Walk up the input tree(s) for this node and check for multiple versions of the same node_x being used in the current _output of different paths
+        Also make sure we really have kept track of the whole trail all along ..... 
+        """
+
     
     def get_fresh_output_recursive_fingerprint(self, identity_key: str) -> str:  
         output = self.output
@@ -321,6 +333,7 @@ class BaseNode(BaseGraphElement):
     def _outer_should_recompute_output(self, latest_input_fingerprint: Fingerprint) -> bool:
         # TODO: implement this
         if self._inner_should_recompute_output():
+            # useful for db access nodes that set _inner_compute_output to check on 'last_modified' in a db for example
             return True
         if self._output is None or self._output.input_fingerprint != latest_input_fingerprint:
             print(f"Should recompute output for {self.identity_key()} because input fingerprint changed from {self._output.input_fingerprint} to {latest_input_fingerprint}")
