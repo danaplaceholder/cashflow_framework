@@ -1,11 +1,14 @@
 """
 graph visualizer/drawing
 """
-from src.cashflow.models.nodesonly2 import BaseGraphElement, ElementStatus
+from base import BaseGraphElement, ElementStatus
 import graphviz
 import os
 import time
-
+"""
+for f in *.svg; do rsvg-convert "$f" -o "${f%.svg}.png"; done 
+ffmpeg -framerate 24 -pattern_type glob -i '*.png'  -vf "scale=iw*8:ih*8:flags=neighbor,pad=ceil(iw/2)*2:ceil(ih/2)*2"  -c:v libx264 -pix_fmt yuv420p out5.mp4
+"""
 
 # -------------------------------------Visualization-------------------------------------
 #class FirmEconomicsNode(BaseGraphElement):

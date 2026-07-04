@@ -1,7 +1,7 @@
 """
 trading data pipeline with dashed dependencies
 """
-from src.cashflow.base import BaseDataElement, BaseGraphElement
+from base import BaseDataElement, BaseGraphElement
 from pydantic import PrivateAttr
 from pydantic import BaseModel
 import time

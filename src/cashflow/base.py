@@ -8,7 +8,9 @@ from enum import StrEnum
 
 
 class Fingerprint(BaseModel):
-    value: str
+    identity_key: str
+    result_fingerprint_value: str # combination of identity keys (for BaseGraphElements) and values (for BaseDataElements)
+    version_number: int
     _timestamp: float = PrivateAttr(default=time.time())
     def is_less_than_100ms_old(self) -> bool:
         fingerprint_age = time.time() - self._timestamp
@@ -16,6 +18,21 @@ class Fingerprint(BaseModel):
             return True
         else:
             return False
+
+    def results_match(self, other: 'Fingerprint') -> bool:
+        return self.result_fingerprint_value == other.result_fingerprint_value
+
+    def version_number_matches(self, other: 'Fingerprint') -> bool:
+        return self.version_number == other.version_number
+
+    def update(self, other: 'Fingerprint') -> None:
+        pass
+        # TODO: implement this
+
+    @classmethod
+    def combine_fingerprints(self, other: 'Fingerprint') -> 'Fingerprint':
+        # TODO: implement this
+        pass
 
 class ElementStatus(StrEnum):
     CREATED = "created"
@@ -176,7 +193,7 @@ class BaseGraphElement(BaseModel):
         pass
 
     def _get_current_cache_key(self) -> str:
-        return self.identity_key() + self._last_input_fingerprint.value
+        return self.identity_key() + self._last_input_fingerprint.result_fingerprint_value
 
     def _get_from_cache(self) -> Output:
         # TODO: implement this
