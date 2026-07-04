@@ -4,29 +4,19 @@ from pydantic import PrivateAttr
 from pydantic import Field
 import os
 import time
-import graphviz
 from enum import StrEnum
+
 
 class Fingerprint(BaseModel):
     value: str
     _timestamp: float = PrivateAttr(default=time.time())
-    _epoch_dict: dict[int, GraphEpoch] = PrivateAttr(default={}) 
     def is_less_than_100ms_old(self) -> bool:
         fingerprint_age = time.time() - self._timestamp
         if fingerprint_age < 0.01:
             return True
         else:
             return False
-    @classmethod
-    def combine_fingerprints(cls, list_of_fingerprints: List['Fingerprint']) -> 'Fingerprint':
-        # TODO: 
-        pass
-    def update(self, other: 'Fingerprint') -> None:
-        # TODO: 
-        pass
-class GraphEpoch(BaseModel):
-    epoch_number: int
-    _timestamp: float = PrivateAttr(default=time.time())
+
 class ElementStatus(StrEnum):
     CREATED = "created"
     CHECKING_IF_SHOULD_EXIST = "checking_if_should_exist"
@@ -86,8 +76,8 @@ class BaseGraphElement(BaseModel):
                 elif isinstance(value, BaseGraphElement):
                     all_fields_fingerprints.append(value.recursive_output_fingerprint())
                 else:
-                    raise ValueError(f"all input fields must be either a list of BaseGraphElements or a BaseGraphElement")
-            return Fingerprint.combine_fingerprints(all_fields_fingerprints)
+                    all_fields_fingerprints.append(str(value))
+            return Fingerprint(value=f''.join(all_fields_fingerprints))
         def update(self, new_input: 'BaseGraphElement.Input') -> None:
             """
             Simpler than updating output. We won't delete any nodes we just make sure we are pointing to the correct nodes per identity keys
@@ -116,15 +106,6 @@ class BaseGraphElement(BaseModel):
                         setattr(self, field_name, new_input_value)
                 
     class Output(BaseModel):
-        _fingerprint: Fingerprint = PrivateAttr(default=None)
-
-        def fingerprint(self) -> Fingerprint:
-            return self._fingerprint
-
-        def update_fingerprint(self, new_fingerprint: Fingerprint) -> None:
-            self._fingerprint.update(new_fingerprint)
-
-
         def contains(self, node: 'BaseGraphElement') -> bool:
             for field_name, _ in self.__class__.model_fields.items():
                 value = getattr(self, field_name)
@@ -140,8 +121,6 @@ class BaseGraphElement(BaseModel):
             if type(self) != type(new_output):
                 raise ValueError(f"new_output must be of type {type(self)}")
             for field_name, field_info in self.__class__.model_fields.items():
-                    if field_info.annotation is Fingerprint:
-                        self._fingerprint.update(getattr(new_output, field_name))
 
                     old_value = getattr(self, field_name)
                     new_value = getattr(new_output, field_name)
@@ -188,9 +167,9 @@ class BaseGraphElement(BaseModel):
         return self._output
 
     def identity_key(self) -> str:
-        return self._created_by_identity_key() + self.__class__.__name__ + self.config_hash()
+        return self.created_by_identity_key() + self.__class__.__name__ + self.config_hash()
 
-    def _created_by_identity_key(self) -> str:
+    def created_by_identity_key(self) -> str:
         return self.created_by.identity_key() if self.created_by else ""
 
     def _compute_output(self) -> Output:
@@ -241,19 +220,17 @@ class BaseGraphElement(BaseModel):
         if output is None:
             return "NONE"
         for field_name, field_info in output.__class__.model_fields.items():
-            value = getattr(output, field_name)
-            if isinstance(value, list) and issubclass(value[0].__class__, BaseGraphElement):
-                fingerprint_dict[field_name] = {item.recursive_output_fingerprint() for item in value}
-            elif isinstance(value, BaseGraphElement):
-                fingerprint_dict[field_name] = value.recursive_output_fingerprint()
-            elif isinstance(value, list) and issubclass(value[0].__class__, BaseDataElement):
-                fingerprint_dict[field_name] = {item.recursive_output_fingerprint() for item in value}
-            elif isinstance(value, BaseDataElement):
-                fingerprint_dict[field_name] = value.recursive_output_fingerprint()
+            if isinstance(getattr(output, field_name), list) and issubclass(getattr(output, field_name)[0].__class__, BaseGraphElement):
+                fingerprint_dict[field_name] = {item.recursive_output_fingerprint() for item in getattr(output, field_name)}
+            elif isinstance(getattr(output, field_name), BaseGraphElement):
+                fingerprint_dict[field_name] = getattr(output, field_name).recursive_output_fingerprint()
+            elif isinstance(getattr(output, field_name), list) and issubclass(getattr(output, field_name)[0].__class__, BaseDataElement):
+                fingerprint_dict[field_name] = {item.recursive_output_fingerprint() for item in getattr(output, field_name)}
+            elif isinstance(getattr(output, field_name), BaseDataElement):
+                fingerprint_dict[field_name] = getattr(output, field_name).recursive_output_fingerprint()
             else:
-                fingerprint_dict[field_name] = str(value)
-        new_fingerprint = Fingerprint.combine_fingerprints(list(fingerprint_dict.values()))
-        return new_fingerprint
+                fingerprint_dict[field_name] = str(getattr(output, field_name))
+        return str(fingerprint_dict)
     def should_exist(self ) -> bool:
         if self._status == ElementStatus.DELETED:
             return False
