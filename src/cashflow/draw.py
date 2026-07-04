@@ -1,7 +1,7 @@
 """
 graph visualizer/drawing
 """
-from base import BaseGraphElement, ElementStatus
+from base import BaseNode, ElementStatus
 import graphviz
 import os
 import time
@@ -11,11 +11,11 @@ ffmpeg -framerate 24 -pattern_type glob -i '*.png'  -vf "scale=iw*8:ih*8:flags=n
 """
 
 # -------------------------------------Visualization-------------------------------------
-#class FirmEconomicsNode(BaseGraphElement):
-#    class Input(BaseGraphElement.Input):
+#class FirmEconomicsNode(BaseNode):
+#    class Input(BaseNode.Input):
 #        trade_analysis_node: TradeAnalysisNode
 #        firm_info_node: FirmInfoNode
-#    class Output(BaseGraphElement.Output):
+#    class Output(BaseNode.Output):
 #        firm_economics: FirmEconomics
 #    def _compute_output(self) -> Output:
 #        return self.Output(firm_economics=FirmEconomics(trade_analysis=self.input.trade_analysis_node.output.trade_analysis, firm_info=self.input.firm_info_node.output.firm_info))
@@ -117,17 +117,17 @@ def build(nodes, contains, edges, filename="graph",
 
 
 
-def build_graph(node: BaseGraphElement):
+def build_graph(node: BaseNode):
 
 
-    def walk(node: BaseGraphElement):
+    def walk(node: BaseNode):
        nodes[node.element_name()] = node.element_name()
        output = node._output
        input = node.input
        if input:
            for field_name, field_info in input.__class__.model_fields.items():
              value = getattr(input, field_name)
-             if isinstance(value, BaseGraphElement):
+             if isinstance(value, BaseNode):
                edges.append((value.element_name(), node.element_name()))
              elif isinstance(value, list ):
                for item in value:
@@ -136,12 +136,12 @@ def build_graph(node: BaseGraphElement):
            contains[node.element_name()] = []
            for field_name, field_info in output.__class__.model_fields.items():
              value = getattr(output, field_name)
-             if isinstance(value, BaseGraphElement):
+             if isinstance(value, BaseNode):
                contains[node.element_name()].append(value.element_name())
                walk(value)   
              elif isinstance(value, list ):
                for item in value:
-                 if isinstance(item, BaseGraphElement):
+                 if isinstance(item, BaseNode):
                      contains[node.element_name()].append(item.element_name())
                      walk(item)
 

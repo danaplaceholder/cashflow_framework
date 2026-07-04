@@ -1,7 +1,7 @@
 """
 trading data pipeline with dashed dependencies
 """
-from base import BaseDataElement, BaseGraphElement
+from base import BaseDataElement, BaseNode, Input, Output, GraphElementConfig
 from pydantic import PrivateAttr
 from pydantic import BaseModel
 import time
@@ -27,12 +27,12 @@ class SymbolTradeAnalysis(BaseDataElement):
     number_trades: int
     average_price: float
 
-class SymbolConfig(BaseGraphElement.GraphElementConfig):
+class SymbolConfig(GraphElementConfig):
     symbol: str
-class DataAccessNode(BaseGraphElement):
-    class Input(BaseGraphElement.Input):
+class DataAccessNode(BaseNode):
+    class Input(Input):
         pass
-    class Output(BaseGraphElement.Output):
+    class Output(Output):
         pass
     def _compute_output(self) -> Output:
         pass
@@ -93,7 +93,7 @@ ALL_SYMBOL_ONTOLOGY_3 = {"symbol_ontology": [
         
 class GetAllTradesNode(DataAccessNode):
     _last_modified: int = PrivateAttr(default=TRADES_IN_DB_1["last_modified"])
-    class Output(BaseGraphElement.Output):
+    class Output(Output):
         all_trades: list[Trade]
 
     def _compute_output(self) -> Output:
@@ -105,7 +105,7 @@ class GetAllTradesNode(DataAccessNode):
         return self._last_modified != TRADES_IN_DB_1["last_modified"]
 
 class GetAllYesterdayPositionsNode(DataAccessNode):
-    class Output(BaseGraphElement.Output):
+    class Output(Output):
         all_yesterday_positions: list[Position]
     def _compute_output(self) -> Output:
         return self.Output(all_yesterday_positions=[
@@ -114,7 +114,7 @@ class GetAllYesterdayPositionsNode(DataAccessNode):
         ])
 class GetAllSymbolOntologyNode(DataAccessNode):
     _last_modified: int = PrivateAttr(default=ALL_SYMBOL_ONTOLOGY_1["last_modified"])
-    class Output(BaseGraphElement.Output):
+    class Output(Output):
         all_symbol_ontology: list[SymbolOntology]
     def _compute_output(self) -> Output:
         return self.Output(all_symbol_ontology=ALL_SYMBOL_ONTOLOGY_1["symbol_ontology"])
@@ -124,11 +124,11 @@ class GetAllSymbolOntologyNode(DataAccessNode):
         else:
             return False
 
-class GetSymbolOntologyNode(BaseGraphElement):
+class GetSymbolOntologyNode(BaseNode):
     config: SymbolConfig
-    class Input(BaseGraphElement.Input):
+    class Input(Input):
         get_all_symbol_ontology_node: GetAllSymbolOntologyNode
-    class Output(BaseGraphElement.Output):
+    class Output(Output):
         symbol_ontology: SymbolOntology
     def _compute_output(self) -> Output:
         for symbol_ontology in self.input.get_all_symbol_ontology_node.output.all_symbol_ontology:
@@ -136,11 +136,11 @@ class GetSymbolOntologyNode(BaseGraphElement):
                 return self.Output(symbol_ontology=symbol_ontology)
         return self.Output(symbol_ontology=None)
     
-class GetSymbolYesterdayPositionNode(BaseGraphElement):
+class GetSymbolYesterdayPositionNode(BaseNode):
     config: SymbolConfig
-    class Input(BaseGraphElement.Input):
+    class Input(Input):
         get_all_yesterday_positions_node: GetAllYesterdayPositionsNode
-    class Output(BaseGraphElement.Output):
+    class Output(Output):
         symbol_yesterday_position: Position
     def _compute_output(self) -> Output:
         for position in self.input.get_all_yesterday_positions_node.output.all_yesterday_positions:
@@ -148,28 +148,28 @@ class GetSymbolYesterdayPositionNode(BaseGraphElement):
                 return self.Output(symbol_yesterday_position=position)
         return self.Output(symbol_yesterday_position=None)
 
-class GetSymbolTodayTradesNode(BaseGraphElement):
+class GetSymbolTodayTradesNode(BaseNode):
     config: SymbolConfig
-    class Input(BaseGraphElement.Input):
+    class Input(Input):
         get_all_trades_node: GetAllTradesNode
-    class Output(BaseGraphElement.Output):
+    class Output(Output):
         symbol_today_trades: list[Trade]
     def _compute_output(self) -> Output:
         return self.Output(symbol_today_trades=[trade for trade in self.input.get_all_trades_node.output.all_trades if trade.symbol == self.config.symbol])
-class AnalyzeSymbolTradesNode(BaseGraphElement):
+class AnalyzeSymbolTradesNode(BaseNode):
     config: SymbolConfig
-    class Input(BaseGraphElement.Input):
+    class Input(Input):
         get_symbol_today_trades_node: GetSymbolTodayTradesNode
-    class Output(BaseGraphElement.Output):
+    class Output(Output):
         symbol_trade_analysis: SymbolTradeAnalysis
     def _compute_output(self) -> Output:
         symbol_trade_analysis = SymbolTradeAnalysis(symbol=self.config.symbol, number_trades=len(self.input.get_symbol_today_trades_node.output.symbol_today_trades), average_price=sum([trade.price for trade in self.input.get_symbol_today_trades_node.output.symbol_today_trades]) / len(self.input.get_symbol_today_trades_node.output.symbol_today_trades))
         return self.Output(symbol_trade_analysis=symbol_trade_analysis)
-class SymbolTradeAnalysisNode(BaseGraphElement):
+class SymbolTradeAnalysisNode(BaseNode):
     config: SymbolConfig
-    class Input(BaseGraphElement.Input):
+    class Input(Input):
         get_all_today_trades_node: GetAllTradesNode
-    class Output(BaseGraphElement.Output):
+    class Output(Output):
         get_symbol_today_trades_node: GetSymbolTodayTradesNode
         analyze_symbol_trades_node: AnalyzeSymbolTradesNode
     def _compute_output(self) -> Output:
@@ -178,10 +178,10 @@ class SymbolTradeAnalysisNode(BaseGraphElement):
         return self.Output(
             get_symbol_today_trades_node=get_symbol_today_trades_node,
             analyze_symbol_trades_node=analyze_symbol_trades_node,)
-class SymbolsWithActiveTradesNode(BaseGraphElement):
-    class Input(BaseGraphElement.Input):
+class SymbolsWithActiveTradesNode(BaseNode):
+    class Input(Input):
         get_all_trades_node: GetAllTradesNode
-    class Output(BaseGraphElement.Output):
+    class Output(Output):
         symbol_trade_analysis_nodes: list[SymbolTradeAnalysisNode]
 
     def _compute_output(self) -> Output:
@@ -195,11 +195,11 @@ class SymbolsWithActiveTradesNode(BaseGraphElement):
             )) for symbol in all_unique_symbols]
         return self.Output(symbol_trade_analysis_nodes=symbol_trade_analysis_nodes)
 
-class UpdatePositionsNode(BaseGraphElement):
-    class Input(BaseGraphElement.Input):
+class UpdatePositionsNode(BaseNode):
+    class Input(Input):
         get_all_yesterday_positions_node: GetAllYesterdayPositionsNode
         new_trade_symbols_node: SymbolsWithActiveTradesNode
-    class Output(BaseGraphElement.Output):
+    class Output(Output):
         updated_positions: list[Position]
     def _compute_output(self) -> Output:
         updated_positions = []
@@ -212,17 +212,17 @@ class UpdatePositionsNode(BaseGraphElement):
 
 class FirmEconomics(BaseModel):
     sum_of_positions: float
-class FirmEconomicsNode(BaseGraphElement):
-    class Input(BaseGraphElement.Input):
+class FirmEconomicsNode(BaseNode):
+    class Input(Input):
         update_positions_node: UpdatePositionsNode
         all_symbol_ontology_node: GetAllSymbolOntologyNode
-    class Output(BaseGraphElement.Output):
+    class Output(Output):
         firm_economics: FirmEconomics
     def _compute_output(self) -> Output:
         sum_of_positions = sum([position.position for position in self.input.update_positions_node.output.updated_positions])
         return self.Output(firm_economics=FirmEconomics(sum_of_positions=sum_of_positions))
-class TradeAnalysisNode(BaseGraphElement):
-    class Output(BaseGraphElement.Output):
+class TradeAnalysisNode(BaseNode):
+    class Output(Output):
         all_today_trades_node: GetAllTradesNode
         all_yesterday_positions_node: GetAllYesterdayPositionsNode
         all_symbol_ontology_node: GetAllSymbolOntologyNode
@@ -256,7 +256,7 @@ if __name__ == "__main__":
     firm_economics_node = trade_analysis_node.output.firm_economics_node.output.firm_economics
     time.sleep(1)
 
-    print(f"HEYYYYY")
+    print("HEYYYYY")
     # change TSLA
     ALL_SYMBOL_ONTOLOGY_1 = ALL_SYMBOL_ONTOLOGY_2
     firm_economics_output_2 = trade_analysis_node.output.firm_economics_node.output.firm_economics
