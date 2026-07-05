@@ -8,12 +8,11 @@ from enum import StrEnum
 
 class Fingerprint(BaseModel):
     identity_key: str = ""
-    field_value_dict: dict
+    field_value_dict: dict | None  | str = None
     _version_number: int = PrivateAttr(default=0)
     _timestamp: float = PrivateAttr(default=time.time())
 
     def __eq__(self, other: 'Fingerprint') -> bool:
-        print(f"Checking if {self.identity_key} == {other.identity_key} and {self.version_number_matches(other)}")
         return self.identity_key == other.identity_key and self.version_number_matches(other) # TODO: implement this
 
     def version_number(self) -> int:
@@ -44,25 +43,64 @@ class Fingerprint(BaseModel):
         # TODO: implement this
         pass
 
+def get_all_non_null_fields(model: BaseModel) -> list:
+    all_fields = []
+    for field_name, _ in model.__class__.model_fields.items():
+        value = getattr(model, field_name)
+        if value is None:
+            continue
+        elif isinstance(value, list):
+            all_fields.extend([k for k in value if k is not None])
+        else:
+            all_fields.append(value)
+    return all_fields
+
+class GraphStateError(Exception):
+    pass
 class FingerprintMixin:
 
         _fingerprint: Fingerprint = PrivateAttr(default=None)
 
-        def get_fresh_recursive_fingerprint(self, identity_key: str, prefix: str) -> Fingerprint:
-            output_recursive_fingerprints = {}
-            input_recursive_fingerprints = {}
-            for field_name, _ in self.__class__.model_fields.items():
-                value = getattr(self, field_name)
-                if isinstance(value, list):
-                    input_recursive_fingerprints[field_name] = [item.get_fresh_input_recursive_fingerprint(identity_key = item.identity_key()) for item in value]
-                    output_recursive_fingerprints[field_name] = [item.get_fresh_output_recursive_fingerprint(identity_key = item.identity_key()) for item in value]
-                else:
-                    input_recursive_fingerprints[field_name] = value.get_fresh_input_recursive_fingerprint(identity_key = value.identity_key())
-                    output_recursive_fingerprints[field_name] = value.get_fresh_output_recursive_fingerprint(identity_key = value.identity_key())
-            return Fingerprint(output_recursive_fingerprints=output_recursive_fingerprints, input_recursive_fingerprints=input_recursive_fingerprints, identity_key= prefix + identity_key)
+        def _add_to_running_dict(self, running_dict: dict, key: str, value: dict | str | None ) -> None:
+               new_fingerprint = Fingerprint(identity_key=key, field_value_dict=value)
+               if key in running_dict:
+                    if running_dict[key] is not None:
+                        if running_dict[key] != new_fingerprint:
+                            for i in range(30):
+                                logging.warning("--------------------------------------------------")
+                            logging.warning(f"--------------------------------------------------Fingerprint changed for {key} from {running_dict[key]} to {new_fingerprint}")
+
+                            raise GraphStateError(f"Fingerprint changed for {key} from {running_dict[key]} to {new_fingerprint}")
+                    else:
+                        running_dict[key] = new_fingerprint # TODO: should this ever happen? 
+               else:
+                    running_dict[key] = new_fingerprint
+               return running_dict
+        def get_fresh_recursive_fingerprint(self, running_dict:dict={}) -> Fingerprint:
+            try:
+                if self.created_by is not None:
+                    created_by_input_fingerprint = self.created_by.input.get_fresh_recursive_fingerprint(running_dict=running_dict) if self.created_by.input is not None else None
+                    created_by_output_fingerprint = self.created_by.output.get_fresh_recursive_fingerprint(running_dict=running_dict) if self.created_by.output is not None else None
+                    if created_by_input_fingerprint is not None:
+                        running_dict = self._add_to_running_dict(running_dict, key = self.created_by.identity_key(), value = created_by_input_fingerprint)
+                    if created_by_output_fingerprint is not None:
+                        running_dict = self._add_to_running_dict(running_dict, key = self.created_by.identity_key(), value = created_by_output_fingerprint)
+                for field in get_all_non_null_fields(self):
+                    if issubclass(field.__class__, BaseDataElement):
+                        running_dict = self._add_to_running_dict(running_dict, key = field.identity_key(), value = str(field))
+                    input_fingerprint = field.input.get_fresh_recursive_fingerprint(running_dict=running_dict) if field.input is not None else None
+                    output_fingerprint = field.output.get_fresh_recursive_fingerprint(running_dict=running_dict) if field.output is not None else None
+                    if input_fingerprint is not None:
+                        running_dict = self._add_to_running_dict(running_dict, key = field.identity_key(), value = input_fingerprint)
+                    if output_fingerprint is not None:
+                        running_dict = self._add_to_running_dict(running_dict, key = field.identity_key(), value = output_fingerprint)
+            except GraphStateError as e:
+                logging.warning(f"Error getting fresh recursive fingerprint for {self.element_name()}: {e}")
+                return e 
+            return running_dict
 
 class Input(BaseModel, FingerprintMixin):
-
+        created_by: 'BaseNode' = None
                     
         def update(self, new_input: 'BaseNode.Input') -> None:
             """
@@ -92,6 +130,7 @@ class Input(BaseModel, FingerprintMixin):
                         setattr(self, field_name, new_input_value)
 
 class Output(BaseModel, FingerprintMixin):
+        created_by: 'BaseNode' = None
         _input_fingerprint: Fingerprint = PrivateAttr(default=None)
 
         @property
@@ -169,16 +208,11 @@ class BaseGraphElement(BaseModel):
     pass
 
 class BaseDataElement(BaseGraphElement, FingerprintMixin):
+    input: None = None
+    output: None = None
     
     def identity_key(self) -> str:
         return "DATA_" + str(self)
-
-    def get_fresh_output_recursive_fingerprint(self, identity_key: str) -> str:
-        return str(self)            
-
-    def get_fresh_input_recursive_fingerprint(self, identity_key: str) -> str:
-        return "" # TODO: this
- 
 class BaseNode(BaseGraphElement):
     # TODO Caching layer ? 
     created_by: 'BaseNode' = None
@@ -223,7 +257,7 @@ class BaseNode(BaseGraphElement):
         if not self.should_exist():
             raise ValueError(f"Node {self.config_hash()} of class {self.__class__.__name__} should not exist. This can happen if you specifically ask for a node that has been deleted but should not happen asynchronously.")
         else:
-            latest_input_fingerprint = self.get_fresh_input_recursive_fingerprint(self.identity_key())
+            latest_input_fingerprint = self.input.get_fresh_recursive_fingerprint( ) if self.input is not None else None
             if self._output is None:
                 self._outer_compute_output(pre_compute_input_fingerprint=latest_input_fingerprint)
             else:
@@ -263,7 +297,7 @@ class BaseNode(BaseGraphElement):
         self.set_status(ElementStatus.COMPUTING_OUTPUT)
 
         computed_output = self._compute_output()
-        post_compute_input_fingerprint = self.get_fresh_input_recursive_fingerprint(self.identity_key())
+        post_compute_input_fingerprint = self.input.get_fresh_recursive_fingerprint() if self.input is not None else None
         
         if pre_compute_input_fingerprint != post_compute_input_fingerprint:
             logging.warning(f"Input fingerprints changed after computation for {self.identity_key()}....recomputing")
@@ -281,13 +315,6 @@ class BaseNode(BaseGraphElement):
             self.set_status(ElementStatus.COMPLETED)
 
 
-    def get_fresh_input_recursive_fingerprint(self, identity_key: str) -> str:
-        if self.input is None:
-            return None
-        else:
-            next_input_fingerprint = self.input.get_fresh_recursive_fingerprint(identity_key = identity_key, prefix="INPUT_")
-
-            return next_input_fingerprint
 
     def check_all_upstream_node_versions_for_current_output(self) -> bool:
         """
@@ -296,13 +323,7 @@ class BaseNode(BaseGraphElement):
         """
 
     
-    def get_fresh_output_recursive_fingerprint(self, identity_key: str) -> str:  
-        output = self.output
-        if output is None:
-            return None
-        else:
-            return output.get_fresh_recursive_fingerprint(identity_key = identity_key, prefix="OUTPUT_")
-        
+
     def should_exist(self ) -> bool:
         if self._status == ElementStatus.DELETED:
             return False
