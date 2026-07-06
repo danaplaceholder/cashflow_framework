@@ -253,20 +253,20 @@ class TradeAnalysisNode(BaseNode):
 
 if __name__ == "__main__":
     trade_analysis_node = TradeAnalysisNode()
-    firm_economics_node = trade_analysis_node.output.firm_economics_node.output.firm_economics
-    time.sleep(1)
+   # firm_economics_node = trade_analysis_node.output.firm_economics_node.output.firm_economics
+   # time.sleep(1)
+#
+   # print("HEYYYYY")
+   # # change TSLA
+   # ALL_SYMBOL_ONTOLOGY_1 = ALL_SYMBOL_ONTOLOGY_2
+   # firm_economics_output_2 = trade_analysis_node.output.firm_economics_node.output.firm_economics
+   # time.sleep(1)
+   # # RM TSLA
+   # firm_economics_output_2 = trade_analysis_node.output.firm_economics_node.output.firm_economics
+   # time.sleep(1)
+   # # CHANGE TSLA again
+   # ALL_SYMBOL_ONTOLOGY_1 = ALL_SYMBOL_ONTOLOGY_3
+   # firm_economics_output_3 = trade_analysis_node.output.firm_economics_node.output.firm_economics  
 
-    print("HEYYYYY")
-    # change TSLA
-    ALL_SYMBOL_ONTOLOGY_1 = ALL_SYMBOL_ONTOLOGY_2
-    firm_economics_output_2 = trade_analysis_node.output.firm_economics_node.output.firm_economics
-    time.sleep(1)
-    # RM TSLA
-    TRADES_IN_DB_1 = TRADES_IN_DB_2
-    firm_economics_output_2 = trade_analysis_node.output.firm_economics_node.output.firm_economics
-    time.sleep(1)
-    # CHANGE TSLA again
-    ALL_SYMBOL_ONTOLOGY_1 = ALL_SYMBOL_ONTOLOGY_3
-    firm_economics_output_3 = trade_analysis_node.output.firm_economics_node.output.firm_economics  
-
-
+    moo = trade_analysis_node.output.all_today_trades_node.output.get_fresh_recursive_fingerprint()
+    print(moo)
