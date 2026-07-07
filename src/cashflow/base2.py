@@ -35,11 +35,14 @@ class GraphElementFingerprint(BaseModel):
 
     def _inner_update(self, new_fingerprint: 'GraphElementFingerprint') -> None:
         raise NotImplementedError("Subclasses must implement this method")
+
+    def __eq__( self, other: 'GraphElementFingerprint') -> bool:
+        return self.identity_key == other.identity_key and not self._inner_compare(other) 
         
 
 class CollectionFingerprint(GraphElementFingerprint):
     def _inner_update(self, new_fingerprint: 'OutputFingerprint') -> None:
-        for field_name in self.__class__.field_names:
+        for field_name in self.field_fingerprint_dict.keys():
             old_value = self.field_fingerprint_dict.get(field_name)
             new_value = new_fingerprint.field_fingerprint_dict.get(field_name)
             if old_value == new_value:
@@ -65,7 +68,7 @@ class CollectionFingerprint(GraphElementFingerprint):
                 old_value.update(new_value)
     def _inner_compare(self,  new_fingerprint: 'GraphElementFingerprint') -> None:
         diffs = []
-        for field_name in self.__class__.field_names:
+        for field_name in self.field_fingerprint_dict.keys():
             old_value = self.field_fingerprint_dict.get(field_name)
             new_value = new_fingerprint.field_fingerprint_dict.get(field_name)
             if old_value == new_value:
@@ -98,22 +101,21 @@ class DataFingerprint(GraphElementFingerprint):
     def _inner_update(self, new_fingerprint: 'DataFingerprint') -> None:
         if self.data_hash != new_fingerprint.data_hash:
             self.data_hash = new_fingerprint.data_hash
-    def _inner_compare(self, old_fingerprint: 'DataFingerprint', new_fingerprint: 'DataFingerprint') -> None:
-        if old_fingerprint.data_hash != new_fingerprint.data_hash:
-            return [(self.data_hash, old_fingerprint.data_hash, new_fingerprint.data_hash)]
+    def _inner_compare(self, new_fingerprint: 'DataFingerprint') -> None:
+        if self.data_hash != new_fingerprint.data_hash:
+            return [(self.data_hash, new_fingerprint.data_hash)]
         return []
 
 class OutputFingerprint(CollectionFingerprint):
-    field_fingerprint_dict: dict[str, DataFingerprint | NodeFingerprint | list[DataFingerprint | NodeFingerprint]]
-  
+    field_fingerprint_dict: 'dict[str, DataFingerprint | NodeFingerprint | list[DataFingerprint | NodeFingerprint]]'  
 class InputFingerprint(CollectionFingerprint):
-    field_fingerprint_dict: dict[str,  NodeFingerprint | list[  NodeFingerprint]]
+    field_fingerprint_dict: 'dict[str,  NodeFingerprint | list[  NodeFingerprint]]' 
 
 class NodeFingerprint(GraphElementFingerprint):
     identity_key: str
     input_fingerprint: InputFingerprint | None = None
-    output_fingerprint: OutputFingerprint  
-    created_by_fingerprint: NodeFingerprint | None = None
+    output_fingerprint: OutputFingerprint | None = None
+    created_by_fingerprint: 'NodeFingerprint | None' = None
 
     def _inner_update(self, new_fingerprint: 'NodeFingerprint') -> None:
         if self.input_fingerprint != new_fingerprint.input_fingerprint:
@@ -124,9 +126,9 @@ class NodeFingerprint(GraphElementFingerprint):
             self.created_by_fingerprint.update(new_fingerprint.created_by_fingerprint)
 
     def _inner_compare(self, new_fingerprint: 'NodeFingerprint') -> dict[str, list[str]] | None:
-        input_diffs = self.input_fingerprint._inner_compare(new_fingerprint.input_fingerprint)
-        output_diffs = self.output_fingerprint._inner_compare(new_fingerprint.output_fingerprint)
-        created_by_diffs = self.created_by_fingerprint._inner_compare(new_fingerprint.created_by_fingerprint)
+        input_diffs = self.input_fingerprint._inner_compare(new_fingerprint.input_fingerprint) if self.input_fingerprint is not None else None
+        output_diffs = self.output_fingerprint._inner_compare(new_fingerprint.output_fingerprint) if self.output_fingerprint is not None else None
+        created_by_diffs = self.created_by_fingerprint._inner_compare(new_fingerprint.created_by_fingerprint) if self.created_by_fingerprint is not None else None
         if input_diffs or output_diffs or created_by_diffs:
             return {
                 "identity_key": self.identity_key,
