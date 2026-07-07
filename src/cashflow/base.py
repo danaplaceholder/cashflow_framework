@@ -1,3 +1,4 @@
+from re import L
 from pydantic import BaseModel
 from pydantic import PrivateAttr
 from pydantic import Field
@@ -37,20 +38,28 @@ class Input(BaseModel, GraphElementCollection):
             for field_name, _ in self.__class__.model_fields.items():
                 value = getattr(self, field_name)
                 if isinstance(value, list) and len(value) and issubclass(value[0].__class__, BaseNode):
-                    running_dict[field_name] = [Fingerprint(
-                        identity_key=item.identity_key(), 
-                        input_identity_keys=item.input.recursive_fingerprint() if item.input is not None else None,
-                        created_by_fingerprint=item.created_by_fingerprint() if item.created_by is not None else None,
-                        output_identity_keys=item.output.recursive_fingerprint() if item.output is not None else None,
-                    ) for item in value]
+                    result = []
+                    for item in value:
+                        item_input = item.input
+                        item_output = item.output
+                        item_fingerprint = Fingerprint(
+                            identity_key=item.identity_key(), 
+                            input_identity_keys=item_input.recursive_fingerprint() if item_input is not None else None,
+                            created_by_fingerprint=item.created_by_fingerprint() if item.created_by is not None else None,
+                            output_identity_keys=item_output.recursive_fingerprint() if item_output is not None else None,
+                        )
+                        result.append(item_fingerprint)
+                    running_dict[field_name] = result
             
                 elif issubclass(value.__class__, BaseNode):
+                    item_input = value.input
+                    item_output = value.output
                     running_dict[field_name] = Fingerprint(
                         identity_key=value.identity_key(), 
-                        input_identity_keys=value.input.recursive_fingerprint() if value.input is not None else None,
+                        input_identity_keys=item_input.recursive_fingerprint() if item_input is not None else None,
                         created_by_fingerprint=value.created_by_fingerprint() if value.created_by is not None else None,
-                        output_identity_keys=value.output.recursive_fingerprint() if value.output is not None else None,
-                    )
+                        output_identity_keys=item_output.recursive_fingerprint() if item_output is not None else None,
+                    ) 
                 else:
                     raise ValueError(f"Invalid type for {field_name}: {type(value)}")
                 
@@ -91,12 +100,18 @@ class Output(BaseModel, GraphElementCollection):
             for field_name, _ in self.__class__.model_fields.items():
                 value = getattr(self, field_name)
                 if isinstance(value, list) and len(value) and issubclass(value[0].__class__, BaseNode):
-                    running_dict[field_name] = [Fingerprint(
-                        identity_key=item.identity_key(), 
-                        input_identity_keys=item.input.recursive_fingerprint() if item.input is not None else None,
-                        created_by_fingerprint=item.created_by_fingerprint() if item.created_by is not None else None,
-                        output_identity_keys=item.output.recursive_fingerprint() if item.output is not None else None,
-                    ) for item in value]
+                    result = []
+                    for item in value:
+                        item_input = item.input
+                        item_output = item.output
+                        item_fingerprint = Fingerprint(
+                            identity_key=item.identity_key(), 
+                            input_identity_keys=item_input.recursive_fingerprint() if item_input is not None else None,
+                            created_by_fingerprint=item.created_by_fingerprint() if item.created_by is not None else None,
+                            output_identity_keys=item_output.recursive_fingerprint() if item_output is not None else None,
+                        )
+                        result.append(item_fingerprint)
+                    running_dict[field_name] = result
                 elif isinstance(value, list) and len(value) and issubclass(value[0].__class__, BaseDataElement):
                     running_dict[field_name] = [Fingerprint(
                         identity_key=item.identity_key(), 
@@ -105,11 +120,13 @@ class Output(BaseModel, GraphElementCollection):
                         output_identity_keys=None,
                     ) for item in value]
                 elif issubclass(value.__class__, BaseNode):
+                    item_input = value.input
+                    item_output = value.output
                     running_dict[field_name] = Fingerprint(
                         identity_key=value.identity_key(), 
-                        input_identity_keys=value.input.recursive_fingerprint() if value.input is not None else None,
+                        input_identity_keys=item_input.recursive_fingerprint() if item_input is not None else None,
                         created_by_fingerprint=value.created_by_fingerprint() if value.created_by is not None else None,
-                        output_identity_keys=value.output.recursive_fingerprint() if value.output is not None else None,
+                        output_identity_keys=item_output.recursive_fingerprint() if item_output is not None else None,
                     )
                 elif isinstance(value, BaseDataElement):
                     running_dict[field_name] = Fingerprint(
@@ -242,17 +259,23 @@ class BaseNode(BaseGraphElement):
     def created_by_fingerprint(self) -> Fingerprint:
         if self.created_by is None:
             return None
+        created_by_input = self.created_by.input if self.created_by.input is not None else None
         return Fingerprint(
             identity_key=self.created_by.identity_key(),
-            input_identity_keys=self.created_by.input.recursive_fingerprint() if self.created_by.input is not None else None,
+            input_identity_keys=created_by_input.recursive_fingerprint() if created_by_input is not None else None,
             created_by_fingerprint=self.created_by.created_by_fingerprint() if self.created_by.created_by is not None else None,
             output_identity_keys=None,
         )
 
+    def refresh_created_by(self) -> None:
+        if self.created_by is None:
+            return
+        else:
+            self.created_by.output # triggers updating of our current node and its dependencies
 
     @property                       
-    def output(self) -> Output:
-        if not self.should_exist():
+    def output(self) -> Output:     
+        if not self.should_exist(): # triggers refresh of created_by
             raise ValueError(f"Node {self.config_hash()} of class {self.__class__.__name__} should not exist. This can happen if you specifically ask for a node that has been deleted but should not happen asynchronously.")
         else:
             latest_upstream_fingerprint = self.input.recursive_fingerprint() if self.input is not None else None
@@ -295,6 +318,7 @@ class BaseNode(BaseGraphElement):
         self.set_status(ElementStatus.COMPUTING_OUTPUT)
 
         computed_output = self._compute_output()
+        self.refresh_created_by()
         post_compute_upstream_fingerprint = self.input.recursive_fingerprint() if self.input is not None else None
         
         if pre_compute_upstream_fingerprint != post_compute_upstream_fingerprint:
@@ -319,8 +343,6 @@ class BaseNode(BaseGraphElement):
         Walk up the input tree(s) for this node and check for multiple versions of the same node_x being used in the current _output of different paths
         Also make sure we really have kept track of the whole trail all along ..... 
         """
-
-    
 
     def should_exist(self ) -> bool:
         if self._status == ElementStatus.DELETED:
@@ -361,7 +383,7 @@ class BaseNode(BaseGraphElement):
             return False
 
     def set_input(self, new_input: 'BaseNode.Input') -> None:
-        if self.input is None:
-            self.input = new_input
+        if self._input is None:
+            self._input = new_input
         else:
-            self.input.update(new_input)
+            self._input.update(new_input)

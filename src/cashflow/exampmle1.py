@@ -232,13 +232,13 @@ if __name__ == "__main__":
 #
     print("HEYYYYY")
     # change TSLA
-    ALL_SYMBOL_ONTOLOGY_1 = ALL_SYMBOL_ONTOLOGY_1
+    ALL_SYMBOL_ONTOLOGY_1 = ALL_SYMBOL_ONTOLOGY_2
     firm_economics_output_2 = trade_analysis_node.output.firm_economics_node.output.firm_economics
     time.sleep(1)
     # RM TSLA
     firm_economics_output_2 = trade_analysis_node.output.firm_economics_node.output.firm_economics
     time.sleep(1)
     # CHANGE TSLA again
-    ALL_SYMBOL_ONTOLOGY_1 = ALL_SYMBOL_ONTOLOGY_1
+    ALL_SYMBOL_ONTOLOGY_1 = ALL_SYMBOL_ONTOLOGY_3
     firm_economics_output_3 = trade_analysis_node.output.firm_economics_node.output.firm_economics  
 
