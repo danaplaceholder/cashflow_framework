@@ -8,17 +8,17 @@ from enum import StrEnum
 
 class Fingerprint(BaseModel):
     identity_key: str = ""
-    input_fingerprint: Fingerprint 
-    created_by_fingerprint: Fingerprint 
-    output_fingerprint: Fingerprint = None
+    input_identity_keys: dict[str, 'Fingerprint | list[Fingerprint]'] | None
+    created_by_fingerprint: 'Fingerprint | None'
+    output_identity_keys: dict[str, 'Fingerprint | list[Fingerprint]'] | None
 
 class GraphStateError(Exception):
     pass
 
-class GraphElementCollection(BaseModel):
-    _fingerprint: Fingerprint = PrivateAttr(default=None)
+class GraphElementCollection:
 
-    def add_to_running_dict(self, running_dict: dict, key: str, value: dict | str | None ) -> None:
+    @staticmethod
+    def add_to_running_dict(running_dict: dict, key: str, value: dict | str | None ) -> None:
         new_fingerprint = Fingerprint(identity_key=key, key_value_dict=value)
         if key in running_dict:
             if running_dict[key] is not None:
@@ -29,40 +29,32 @@ class GraphElementCollection(BaseModel):
         else:
             running_dict[key] = new_fingerprint
         return running_dict
-    def upstream_fingerprint(self) -> Fingerprint:
-        running_dict = {}
-        for field_name, _ in self.__class__.model_fields.items():
-            value = getattr(self, field_name)
-            if isinstance(value, list) and len(value) and issubclass(value[0].__class__, BaseNode):
-                for item in value:
-                    self.add_to_running_dict(running_dict, item.identity_key(), item.get_fingerprint())
-            elif isinstance(value, list) and len(value) and issubclass(value[0].__class__, BaseDataElement):
-                for item in value:
-                    self.add_to_running_dict(running_dict, item.identity_key(), item)
-            elif issubclass(value.__class__, BaseNode):
-                self.add_to_running_dict(running_dict, value.identity_key(), value.get_fingerprint())
-            elif isinstance(value, BaseDataElement):
-                self.add_to_running_dict(running_dict, value.identity_key(), value)
-        return Fingerprint(key_value_dict=running_dict)
-    
 
 class Input(BaseModel, GraphElementCollection):
 
-        def recursive_fingerprint(self) -> Fingerprint:
+        def recursive_fingerprint(self ) -> dict[str, Fingerprint | list[Fingerprint]]:
             running_dict = {}
             for field_name, _ in self.__class__.model_fields.items():
                 value = getattr(self, field_name)
                 if isinstance(value, list) and len(value) and issubclass(value[0].__class__, BaseNode):
-                    for item in value:
-                        self.add_to_running_dict(running_dict, item.identity_key(), item.recursive_full_fingerprint())
-                elif isinstance(value, list) and len(value) and issubclass(value[0].__class__, BaseDataElement):
-                    for item in value:
-                        self.add_to_running_dict(running_dict, item.identity_key(), item)
+                    running_dict[field_name] = [Fingerprint(
+                        identity_key=item.identity_key(), 
+                        input_identity_keys=item.input.recursive_fingerprint() if item.input is not None else None,
+                        created_by_fingerprint=item.created_by_fingerprint() if item.created_by is not None else None,
+                        output_identity_keys=item.output.recursive_fingerprint() if item.output is not None else None,
+                    ) for item in value]
+            
                 elif issubclass(value.__class__, BaseNode):
-                    self.add_to_running_dict(running_dict, value.identity_key(), value.recursive_full_fingerprint())
-                elif isinstance(value, BaseDataElement):
-                    self.add_to_running_dict(running_dict, value.identity_key(), value)
-            return Fingerprint(key_value_dict=running_dict)
+                    running_dict[field_name] = Fingerprint(
+                        identity_key=value.identity_key(), 
+                        input_identity_keys=value.input.recursive_fingerprint() if value.input is not None else None,
+                        created_by_fingerprint=value.created_by_fingerprint() if value.created_by is not None else None,
+                        output_identity_keys=value.output.recursive_fingerprint() if value.output is not None else None,
+                    )
+                else:
+                    raise ValueError(f"Invalid type for {field_name}: {type(value)}")
+                
+            return running_dict
                     
         def update(self, new_input: 'BaseNode.Input') -> None:
             """
@@ -94,44 +86,45 @@ class Input(BaseModel, GraphElementCollection):
 class Output(BaseModel, GraphElementCollection):
         _upstream_fingerprint: Fingerprint = PrivateAttr(default=None)
 
-        def recursive_fingerprint(self) -> Fingerprint:
+        def recursive_fingerprint(self ) -> dict[str, Fingerprint | list[Fingerprint]]:
             running_dict = {}
             for field_name, _ in self.__class__.model_fields.items():
                 value = getattr(self, field_name)
                 if isinstance(value, list) and len(value) and issubclass(value[0].__class__, BaseNode):
-                    for item in value:
-                        self.add_to_running_dict(running_dict, item.identity_key(), item.output.recursive_fingerprint())
+                    running_dict[field_name] = [Fingerprint(
+                        identity_key=item.identity_key(), 
+                        input_identity_keys=item.input.recursive_fingerprint() if item.input is not None else None,
+                        created_by_fingerprint=item.created_by_fingerprint() if item.created_by is not None else None,
+                        output_identity_keys=item.output.recursive_fingerprint() if item.output is not None else None,
+                    ) for item in value]
                 elif isinstance(value, list) and len(value) and issubclass(value[0].__class__, BaseDataElement):
-                    for item in value:
-                        self.add_to_running_dict(running_dict, item.identity_key(), item)
+                    running_dict[field_name] = [Fingerprint(
+                        identity_key=item.identity_key(), 
+                        input_identity_keys=None,
+                        created_by_fingerprint=None,
+                        output_identity_keys=None,
+                    ) for item in value]
                 elif issubclass(value.__class__, BaseNode):
-                    self.add_to_running_dict(running_dict, value.identity_key(), value.output.recursive_fingerprint())
+                    running_dict[field_name] = Fingerprint(
+                        identity_key=value.identity_key(), 
+                        input_identity_keys=value.input.recursive_fingerprint() if value.input is not None else None,
+                        created_by_fingerprint=value.created_by_fingerprint() if value.created_by is not None else None,
+                        output_identity_keys=value.output.recursive_fingerprint() if value.output is not None else None,
+                    )
                 elif isinstance(value, BaseDataElement):
-                    self.add_to_running_dict(running_dict, value.identity_key(), value)
-            return Fingerprint(key_value_dict=running_dict)
-    
-        def single_layer_fingerprint(self) -> Fingerprint:
-            running_dict = {}
-            for field_name, _ in self.__class__.model_fields.items():
-                value = getattr(self, field_name)
-                if isinstance(value, list) and len(value) and issubclass(value[0].__class__, BaseNode):
-                    for item in value:
-                        self.add_to_running_dict(running_dict, item.identity_key())
-                elif isinstance(value, list) and len(value) and issubclass(value[0].__class__, BaseDataElement):
-                    for item in value:
-                        self.add_to_running_dict(running_dict, item.identity_key(), item)
-                elif issubclass(value.__class__, BaseNode):
-                    self.add_to_running_dict(running_dict, value.identity_key(), value)
-                elif isinstance(value, BaseDataElement):
-                    self.add_to_running_dict(running_dict, value.identity_key(), value)
-            return Fingerprint(key_value_dict=running_dict)
-
+                    running_dict[field_name] = Fingerprint(
+                        identity_key=value.identity_key(), 
+                        input_identity_keys=None,
+                        created_by_fingerprint=None,
+                        output_identity_keys=None,
+                    )
+            return running_dict
         @property
         def input_fingerprint(self) -> Fingerprint:
-            return self._input_fingerprint
+            return self._upstream_fingerprint
 
-        def set_input_fingerprint(self, input_fingerprint: Fingerprint) -> None:
-            self._input_fingerprint = input_fingerprint
+        def set_upstream_fingerprint(self, input_fingerprint: Fingerprint) -> None:
+            self._upstream_fingerprint = input_fingerprint
 
         def contains(self, node: 'BaseNode') -> bool:
             for field_name, _ in self.__class__.model_fields.items():
@@ -147,7 +140,7 @@ class Output(BaseModel, GraphElementCollection):
         def update(self, new_output: 'BaseNode.Output', input_fingerprint: Fingerprint) -> None:
             if type(self) is not type(new_output):
                 raise ValueError(f"new_output must be of type {type(self)}")
-            self.set_input_fingerprint(input_fingerprint)
+            self.set_upstream_fingerprint(input_fingerprint)
             for field_name, field_info in self.__class__.model_fields.items():
 
                     old_value = getattr(self, field_name)
@@ -200,7 +193,8 @@ class GraphElementConfig(BaseModel):
 class BaseGraphElement(BaseModel):
     pass
 
-class BaseDataElement(BaseGraphElement, FingerprintMixin):
+class BaseDataElement(BaseGraphElement):
+
     input: None = None
     output: None = None
     
@@ -244,17 +238,16 @@ class BaseNode(BaseGraphElement):
     def element_name(self) -> str:
         return self.__class__.__name__ + "_" +  self.config_hash() + "_STATUS_" + self._status.value
     
-    def recursive_upstream_fingerprint(self) -> Fingerprint:
-        input_fingerprint = self.input.recursive_fingerprint() if self.input is not None else None
-        created_by_fingerprint = self.created_by.recursive_upstream_fingerprint() if self.created_by is not None else None
-        return Fingerprint(input_fingerprint=input_fingerprint, created_by_fingerprint=created_by_fingerprint)
 
-    
-
-    def recursive_full_fingerprint(self) -> Fingerprint:
-        recursive_upstream_fingerprint = self.recursive_upstream_fingerprint()
-        output_fingerprint = self.output.single_layer_fingerprint()
-        return Fingerprint(input_fingerprint=recursive_upstream_fingerprint.input_fingerprint, created_by_fingerprint=recursive_upstream_fingerprint.created_by_fingerprint, output_fingerprint=output_fingerprint)
+    def created_by_fingerprint(self) -> Fingerprint:
+        if self.created_by is None:
+            return None
+        return Fingerprint(
+            identity_key=self.created_by.identity_key(),
+            input_identity_keys=self.created_by.input.recursive_fingerprint() if self.created_by.input is not None else None,
+            created_by_fingerprint=self.created_by.created_by_fingerprint() if self.created_by.created_by is not None else None,
+            output_identity_keys=None,
+        )
 
 
     @property                       
@@ -262,7 +255,7 @@ class BaseNode(BaseGraphElement):
         if not self.should_exist():
             raise ValueError(f"Node {self.config_hash()} of class {self.__class__.__name__} should not exist. This can happen if you specifically ask for a node that has been deleted but should not happen asynchronously.")
         else:
-            latest_upstream_fingerprint = self.recursive_upstream_fingerprint() if self.input is not None else None
+            latest_upstream_fingerprint = self.input.recursive_fingerprint() if self.input is not None else None
             if self._output is None:
                 self._outer_compute_output(pre_compute_upstream_fingerprint=latest_upstream_fingerprint)
             else:
@@ -302,7 +295,7 @@ class BaseNode(BaseGraphElement):
         self.set_status(ElementStatus.COMPUTING_OUTPUT)
 
         computed_output = self._compute_output()
-        post_compute_upstream_fingerprint = self.recursive_upstream_fingerprint() if self.input is not None else None
+        post_compute_upstream_fingerprint = self.input.recursive_fingerprint() if self.input is not None else None
         
         if pre_compute_upstream_fingerprint != post_compute_upstream_fingerprint:
             logging.warning(f"Input fingerprints changed after computation for {self.identity_key()}....recomputing")
@@ -312,7 +305,7 @@ class BaseNode(BaseGraphElement):
 
             if self._output is None:
                 self._output = computed_output
-                self._output.set_input_fingerprint(pre_compute_upstream_fingerprint)
+                self._output.set_upstream_fingerprint(pre_compute_upstream_fingerprint)
             else:
                 self._output.update(computed_output, input_fingerprint=pre_compute_upstream_fingerprint)
 
@@ -356,13 +349,13 @@ class BaseNode(BaseGraphElement):
         # TODO: implement this
         return False
 
-    def _outer_should_recompute_output(self, latest_input_fingerprint: Fingerprint) -> bool:
+    def _outer_should_recompute_output(self, latest_upstream_fingerprint: Fingerprint) -> bool:
         # TODO: implement this
         if self._inner_should_recompute_output():
             # useful for db access nodes that set _inner_compute_output to check on 'last_modified' in a db for example
             return True
-        if self._output is None or self._output.input_fingerprint != latest_input_fingerprint:
-            print(f"Should recompute output for {self.identity_key()} because input fingerprint changed from {self._output.input_fingerprint} to {latest_input_fingerprint}")
+        if self._output is None or self._output.input_fingerprint != latest_upstream_fingerprint:
+            print(f"Should recompute output for {self.identity_key()} because input fingerprint changed from {self._output.input_fingerprint} to {latest_upstream_fingerprint}")
             return True
         else:
             return False

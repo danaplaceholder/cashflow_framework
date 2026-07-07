@@ -40,36 +40,10 @@ class DataAccessNode(BaseNode):
 
 TRADES_IN_DB_1 = {"last_modified": 1, "trades": [ 
             Trade(symbol="AAPL", trade_id="1", direction="Buy", volume=100, price=150.75),
-            Trade(symbol="AAPL", trade_id="2", direction="Sell", volume=50, price=152.25),
-            Trade(symbol="AAPL", trade_id="3", direction="Buy", volume=75, price=151.50),
-            Trade(symbol="AAPL", trade_id="4", direction="Sell", volume=25, price=153.00),
-            Trade(symbol="AAPL", trade_id="5", direction="Buy", volume=125, price=154.25),
-            Trade(symbol="AAPL", trade_id="6", direction="Sell", volume=100, price=155.50),
-            Trade(symbol="AAPL", trade_id="7", direction="Buy", volume=150, price=156.75),
-            Trade(symbol="AAPL", trade_id="8", direction="Sell", volume=75, price=158.00),
-            Trade(symbol="AAPL", trade_id="9", direction="Buy", volume=100, price=159.25),
-            Trade(symbol="AAPL", trade_id="10", direction="Sell", volume=50, price=160.50),
             Trade(symbol="TSLA", trade_id="11", direction="Buy", volume=100, price=161.75),
-            Trade(symbol="TSLA", trade_id="12", direction="Sell", volume=50, price=163.00),
-            Trade(symbol="TSLA", trade_id="13", direction="Buy", volume=75, price=164.25),
-            Trade(symbol="TSLA", trade_id="14", direction="Sell", volume=25, price=165.50),
-            Trade(symbol="TSLA", trade_id="15", direction="Buy", volume=125, price=166.75),
-            Trade(symbol="TSLA", trade_id="16", direction="Sell", volume=100, price=168.00),
-            Trade(symbol="TSLA", trade_id="17", direction="Buy", volume=150, price=169.25),
-            Trade(symbol="TSLA", trade_id="18", direction="Sell", volume=75, price=170.50),
-            Trade(symbol="TSLA", trade_id="19", direction="Buy", volume=100, price=171.75),
         ]}
 TRADES_IN_DB_2 = {"last_modified": 2, "trades": [
     Trade(symbol="AAPL", trade_id="1", direction="Buy", volume=100, price=150.75),
-    Trade(symbol="AAPL", trade_id="2", direction="Sell", volume=50, price=152.25),
-    Trade(symbol="AAPL", trade_id="3", direction="Buy", volume=75, price=151.50),
-    Trade(symbol="AAPL", trade_id="4", direction="Sell", volume=25, price=153.00),
-    Trade(symbol="AAPL", trade_id="5", direction="Buy", volume=125, price=154.25),
-    Trade(symbol="AAPL", trade_id="6", direction="Sell", volume=100, price=155.50),
-    Trade(symbol="AAPL", trade_id="7", direction="Buy", volume=150, price=156.75),
-    Trade(symbol="AAPL", trade_id="8", direction="Sell", volume=75, price=158.00),
-    Trade(symbol="AAPL", trade_id="9", direction="Buy", volume=100, price=159.25),
-    Trade(symbol="AAPL", trade_id="10", direction="Sell", volume=50, price=160.50),
 ]}
 
 ALL_SYMBOL_ONTOLOGY_1 = {"symbol_ontology": [
@@ -253,20 +227,18 @@ class TradeAnalysisNode(BaseNode):
 
 if __name__ == "__main__":
     trade_analysis_node = TradeAnalysisNode()
-   # firm_economics_node = trade_analysis_node.output.firm_economics_node.output.firm_economics
-   # time.sleep(1)
+    firm_economics_node = trade_analysis_node.output.firm_economics_node.output.firm_economics
+    time.sleep(1)
 #
-   # print("HEYYYYY")
-   # # change TSLA
-   # ALL_SYMBOL_ONTOLOGY_1 = ALL_SYMBOL_ONTOLOGY_2
-   # firm_economics_output_2 = trade_analysis_node.output.firm_economics_node.output.firm_economics
-   # time.sleep(1)
-   # # RM TSLA
-   # firm_economics_output_2 = trade_analysis_node.output.firm_economics_node.output.firm_economics
-   # time.sleep(1)
-   # # CHANGE TSLA again
-   # ALL_SYMBOL_ONTOLOGY_1 = ALL_SYMBOL_ONTOLOGY_3
-   # firm_economics_output_3 = trade_analysis_node.output.firm_economics_node.output.firm_economics  
+    print("HEYYYYY")
+    # change TSLA
+    ALL_SYMBOL_ONTOLOGY_1 = ALL_SYMBOL_ONTOLOGY_1
+    firm_economics_output_2 = trade_analysis_node.output.firm_economics_node.output.firm_economics
+    time.sleep(1)
+    # RM TSLA
+    firm_economics_output_2 = trade_analysis_node.output.firm_economics_node.output.firm_economics
+    time.sleep(1)
+    # CHANGE TSLA again
+    ALL_SYMBOL_ONTOLOGY_1 = ALL_SYMBOL_ONTOLOGY_1
+    firm_economics_output_3 = trade_analysis_node.output.firm_economics_node.output.firm_economics  
 
-    moo = trade_analysis_node.output.all_today_trades_node.output.get_fresh_recursive_fingerprint()
-    print(moo)
