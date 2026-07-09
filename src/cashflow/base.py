@@ -86,7 +86,7 @@ class Output(BaseModel):
                         running_dict[field_name] = [
                             NodeFingerprint(
                                 identity_key=item.identity_key(), 
-                                input_fingerprint=None, #item.input.recursive_fingerprint() if item.input is not None else None,
+                                input_fingerprint=item.input.recursive_fingerprint() if item.input is not None else None,
                                 created_by_fingerprint=None, #item.created_by_fingerprint(),
                                 output_fingerprint=None,
                             ) for item in value
