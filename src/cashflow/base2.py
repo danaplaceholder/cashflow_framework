@@ -22,7 +22,7 @@ class GraphElementFingerprint(BaseModel):
     identity_key: str
     _version: Version = PrivateAttr(default=Version())
 
-    def bump_version(self) -> None:
+    def _bump_version(self) -> None:
         self._version.bump_version()
 
     @property
@@ -31,7 +31,7 @@ class GraphElementFingerprint(BaseModel):
 
     def update(self, new_fingerprint: 'GraphElementFingerprint') -> None:
         self._inner_update(new_fingerprint)
-        self.bump_version()
+        self._bump_version()
 
     def _inner_update(self, new_fingerprint: 'GraphElementFingerprint') -> None:
         raise NotImplementedError("Subclasses must implement this method")
@@ -50,22 +50,25 @@ class CollectionFingerprint(GraphElementFingerprint):
             elif old_value is None or new_value is None:
                 self.field_fingerprint_dict[field_name] = new_value
             elif isinstance(old_value, list):  # handles both DataFingerprint and NodeFingerprint
+                updated_list = []
                 old_identity_key_dict = { node_fingerprint.identity_key: node_fingerprint for node_fingerprint in old_value }
                 new_identity_key_dict = { node_fingerprint.identity_key: node_fingerprint for node_fingerprint in new_value }
                 for identity_key, old_node_fingerprint in old_identity_key_dict.items():
                     if identity_key not in new_identity_key_dict:
-                        del self.field_fingerprint_dict[field_name][old_node_fingerprint]
+                        continue
                     elif new_identity_key_dict[identity_key] != old_node_fingerprint:
                         old_node_fingerprint.update(new_identity_key_dict[identity_key])
+                        updated_list.append(old_node_fingerprint)
                     else:
-                        continue
+                        updated_list.append(old_node_fingerprint)
                 for identity_key, new_node_fingerprint in new_identity_key_dict.items():
                     if identity_key not in old_identity_key_dict:
-                        self.field_fingerprint_dict[field_name].append(new_node_fingerprint)
+                        updated_list.append(new_node_fingerprint)
                     else:
                         continue
+                self.field_fingerprint_dict[field_name] = updated_list
             elif old_value != new_value:
-                old_value.update(new_value)
+                self.field_fingerprint_dict[field_name].update(new_value)
     def _inner_compare(self,  new_fingerprint: 'GraphElementFingerprint') -> None:
         diffs = []
         for field_name in self.field_fingerprint_dict.keys():
@@ -82,7 +85,7 @@ class CollectionFingerprint(GraphElementFingerprint):
                     if identity_key not in new_identity_key_dict:
                         diffs.append((f"{self.identity_key}:{field_name} - {identity_key}:Node deleted"))
                     elif new_identity_key_dict[identity_key] != old_node_fingerprint:
-                        diffs.append((f"{self.identity_key}:{field_name} - {identity_key}:Node updated"))
+                        diffs.append(old_node_fingerprint._inner_compare(new_identity_key_dict[identity_key]))
                     else:
                         continue
                 for identity_key, new_node_fingerprint in new_identity_key_dict.items():
@@ -91,7 +94,7 @@ class CollectionFingerprint(GraphElementFingerprint):
                     else:
                         continue
             elif old_value != new_value:
-                diffs.append((f"{self.identity_key}:{field_name} - {old_value.identity_key}: updated to {new_value.identity_key}"))
+                diffs.append(old_value._inner_compare(new_value))
         return diffs
             
 

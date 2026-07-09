@@ -236,6 +236,7 @@ if __name__ == "__main__":
     firm_economics_output_2 = trade_analysis_node.output.firm_economics_node.output.firm_economics
     time.sleep(1)
     # RM TSLA
+    TRADES_IN_DB_1 = TRADES_IN_DB_2
     firm_economics_output_2 = trade_analysis_node.output.firm_economics_node.output.firm_economics
     time.sleep(1)
     # CHANGE TSLA again
