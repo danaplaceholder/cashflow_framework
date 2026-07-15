@@ -262,10 +262,16 @@ class BaseNode(BaseGraphElement):
         """
         A node should recompute if its created_by, input, or external data has changed since last computation
         """
+        # must do created by first since it can affect input dependencies
+        created_by_fingerprint = self.created_by_fingerprint() if self.created_by is not None else None
+        # then do input
+        input_fingerprint = self.input.recursive_fingerprint() if self.input is not None else None
+        # then do external data last modified, since input can affect external data access 
+        external_data_last_modified = self.get_external_data_last_modified() if self.get_external_data_last_modified() is not None else None
         return FullUpstreamFingerprint(
-            created_by_fingerprint=self.created_by_fingerprint() if self.created_by is not None else None,
-            input_fingerprint=self.input.recursive_fingerprint() if self.input is not None else None,
-            external_data_last_modified=self.get_external_data_last_modified() if self.get_external_data_last_modified() is not None else None,
+            created_by_fingerprint=created_by_fingerprint,
+            input_fingerprint=input_fingerprint,
+            external_data_last_modified=external_data_last_modified,
         )
 
     @property                       
@@ -313,7 +319,6 @@ class BaseNode(BaseGraphElement):
         self.set_status(ElementStatus.COMPUTING_OUTPUT)
 
         computed_output = self._compute_output()
-        self.refresh_created_by()  # IMPORTANT: this can affect the input dependencies of this node
         post_compute_full_upstream_fingerprint = self.full_upstream_fingerprint()
         
         if pre_compute_full_upstream_fingerprint != post_compute_full_upstream_fingerprint:
