@@ -5,12 +5,13 @@ from pydantic import Field
 import time
 import logging
 from enum import StrEnum
-from cashflow.fingerprint import DataFingerprint, NodeFingerprint, InputFingerprint, OutputFingerprint, CollectionFingerprint
+from cashflow.fingerprint import DataFingerprint, NodeFingerprint, InputFingerprint, OutputFingerprint, CollectionFingerprint, FullUpstreamFingerprint
 from pprint import pprint
+from abc import ABC, abstractmethod
 class GraphStateError(Exception):
     pass
 
-class Collection(BaseModel):
+class Collection(BaseModel, ABC):
         
     def single_layer_fingerprint(self ) -> 'CollectionFingerprint':
         running_dict = {}
@@ -34,6 +35,7 @@ class Collection(BaseModel):
         return self.__class__.make_fingerprint(running_dict)
     
     @classmethod
+    @abstractmethod
     def make_fingerprint(cls, running_dict: dict[str, DataFingerprint | NodeFingerprint | list[DataFingerprint | NodeFingerprint] | None]) -> 'CollectionFingerprint':
         raise NotImplementedError("Subclasses must implement this method")
 
@@ -72,16 +74,16 @@ class Input(Collection):
                         
 
 class Output(Collection):
-        _input_fingerprint: InputFingerprint = PrivateAttr(default=None)
+        _full_upstream_fingerprint: FullUpstreamFingerprint = PrivateAttr(default=None)
         @classmethod
         def make_fingerprint(cls, running_dict: dict[str, DataFingerprint | NodeFingerprint | list[DataFingerprint | NodeFingerprint] | None]) -> OutputFingerprint:
             return OutputFingerprint(identity_key="some_output", field_fingerprint_dict=running_dict)
         @property
-        def input_fingerprint(self) -> InputFingerprint:
-            return self._input_fingerprint
+        def full_upstream_fingerprint(self) -> FullUpstreamFingerprint:
+            return self._full_upstream_fingerprint
 
-        def set_input_fingerprint(self, input_fingerprint: InputFingerprint) -> None:
-            self._input_fingerprint = input_fingerprint
+        def set_full_upstream_fingerprint(self, full_upstream_fingerprint: FullUpstreamFingerprint) -> None:
+            self._full_upstream_fingerprint = full_upstream_fingerprint
 
         def contains(self, node: 'BaseNode') -> bool:
             for field_name, _ in self.__class__.model_fields.items():
@@ -94,7 +96,7 @@ class Output(Collection):
                     if value.identity_key() == node.identity_key():
                         return True      
             return False
-        def update(self, new_output: 'BaseNode.Output', input_fingerprint: InputFingerprint) -> None:
+        def update(self, new_output: 'BaseNode.Output', full_upstream_fingerprint: FullUpstreamFingerprint) -> None:
             if type(self) is not type(new_output):
                 raise ValueError(f"new_output must be of type {type(self)}")
             for field_name, field_info in self.__class__.model_fields.items():
@@ -127,7 +129,7 @@ class Output(Collection):
                             setattr(self, field_name, new_value)
                     else:
                         setattr(self, field_name, new_value)
-            self.set_input_fingerprint( input_fingerprint)
+            self.set_full_upstream_fingerprint( full_upstream_fingerprint)
 
 
 
@@ -147,8 +149,16 @@ class GraphElementConfig(BaseModel):
         def hash(self) -> str:
             return ''.join([field_name+str(getattr(self, field_name)) for field_name, field_info in self.__class__.model_fields.items() if getattr(self, field_name) is not None])
 
-class BaseGraphElement(BaseModel):
-    pass
+class BaseGraphElement(BaseModel, ABC):
+    @abstractmethod
+    def identity_key(self) -> str:
+        raise NotImplementedError("Subclasses must implement this method")
+    @abstractmethod
+    def single_layer_fingerprint(self) -> DataFingerprint:
+        raise NotImplementedError("Subclasses must implement this method")
+    @abstractmethod
+    def recursive_fingerprint(self) -> DataFingerprint:
+        raise NotImplementedError("Subclasses must implement this method")
 
 class BaseDataElement(BaseGraphElement):
 
@@ -174,6 +184,7 @@ class BaseNode(BaseGraphElement):
     config: GraphElementConfig = Field(default=None)
     input: Input = Field(default=None)
     _output: Output = PrivateAttr(default=None)
+    _full_upstream_fingerprint: FullUpstreamFingerprint = PrivateAttr(default=None)
     _fingerprint: NodeFingerprint = PrivateAttr(default=None)
     _status: ElementStatus = PrivateAttr(default=ElementStatus.CREATED)
 
@@ -197,6 +208,10 @@ class BaseNode(BaseGraphElement):
             created_by_fingerprint=self.created_by_fingerprint(),
             output_fingerprint=item_output.recursive_fingerprint() if item_output is not None else None,
         )
+
+    def get_external_data_last_modified(self) -> int | None:
+        raise NotImplementedError("Subclasses must implement this method")
+
     @property
     def root_node(self) -> 'BaseNode':
         if self.created_by is None:
@@ -241,18 +256,29 @@ class BaseNode(BaseGraphElement):
             return
         else:
             self.created_by.output # triggers updating of our current node and its dependencies
+    
+
+    def full_upstream_fingerprint(self) -> NodeFingerprint:
+        """
+        A node should recompute if its created_by, input, or external data has changed since last computation
+        """
+        return FullUpstreamFingerprint(
+            created_by_fingerprint=self.created_by_fingerprint() if self.created_by is not None else None,
+            input_fingerprint=self.input.recursive_fingerprint() if self.input is not None else None,
+            external_data_last_modified=self.get_external_data_last_modified() if self.get_external_data_last_modified() is not None else None,
+        )
 
     @property                       
     def output(self) -> Output:     
         if not self.should_exist(): # triggers refresh of created_by
             raise ValueError(f"Node {self.config_hash()} of class {self.__class__.__name__} should not exist. This can happen if you specifically ask for a node that has been deleted but should not happen asynchronously.")
         else:
-            latest_input_fingerprint = self.input.recursive_fingerprint() if self.input is not None else None
+            latest_full_upstream_fingerprint = self.full_upstream_fingerprint()
             if self._output is None:
-                self._outer_compute_output(pre_compute_input_fingerprint=latest_input_fingerprint)
+                self._outer_compute_output(pre_compute_full_upstream_fingerprint=latest_full_upstream_fingerprint)
             else:
-                if self._outer_should_recompute_output(latest_input_fingerprint=latest_input_fingerprint):
-                    self._outer_compute_output(pre_compute_input_fingerprint=latest_input_fingerprint)
+                if self._outer_should_recompute_output(latest_full_upstream_fingerprint=latest_full_upstream_fingerprint):
+                    self._outer_compute_output(pre_compute_full_upstream_fingerprint=latest_full_upstream_fingerprint)
                 
             return self._output
 
@@ -277,7 +303,7 @@ class BaseNode(BaseGraphElement):
         pass
 
 
-    def _outer_compute_output(self, pre_compute_input_fingerprint: InputFingerprint) -> Output:
+    def _outer_compute_output(self, pre_compute_full_upstream_fingerprint: FullUpstreamFingerprint) -> Output:
         # check if in cache
         cache_result = self._get_from_cache()
         if cache_result is not None:
@@ -288,19 +314,19 @@ class BaseNode(BaseGraphElement):
 
         computed_output = self._compute_output()
         self.refresh_created_by()  # IMPORTANT: this can affect the input dependencies of this node
-        post_compute_input_fingerprint = self.input.recursive_fingerprint() if self.input is not None else None
+        post_compute_full_upstream_fingerprint = self.full_upstream_fingerprint()
         
-        if pre_compute_input_fingerprint != post_compute_input_fingerprint:
-            logging.warning(f"Input fingerprints changed after computation for {self.identity_key()}....recomputing")
-            self._outer_compute_output(pre_compute_input_fingerprint=post_compute_input_fingerprint)
+        if pre_compute_full_upstream_fingerprint != post_compute_full_upstream_fingerprint:
+            logging.warning(f"Full upstream fingerprint changed after computation for {self.identity_key()}....recomputing")
+            self._outer_compute_output(pre_compute_full_upstream_fingerprint=post_compute_full_upstream_fingerprint)
         else:
             self._put_in_cache(computed_output)
 
             if self._output is None:
                 self._output = computed_output
-                self._output.set_input_fingerprint(pre_compute_input_fingerprint)
+                self._output.set_full_upstream_fingerprint(pre_compute_full_upstream_fingerprint)
             else:
-                self._output.update(computed_output, input_fingerprint=pre_compute_input_fingerprint)
+                self._output.update(computed_output, full_upstream_fingerprint=pre_compute_full_upstream_fingerprint)
 
 
             # mark as completed
@@ -341,21 +367,16 @@ class BaseNode(BaseGraphElement):
         # TODO: implement this
         return False
 
+    def _outer_should_recompute_output(self, latest_full_upstream_fingerprint: FullUpstreamFingerprint) -> bool:
 
-    def _outer_should_recompute_output(self, latest_input_fingerprint: InputFingerprint) -> bool:
-        # TODO: implement this
-        if self._inner_should_recompute_output():
-            # useful for db access nodes that set _inner_compute_output to check on 'last_modified' in a db for example
-            return True
         if self._output is None:
             print(f"Should recompute output for {self.identity_key()} because output is None")
             return True
-        elif self._output.input_fingerprint != latest_input_fingerprint:
-            print(f"Should recompute output for {self.identity_key()} because input fingerprint changed:    \n")
-            pprint( self._output.input_fingerprint._inner_compare(latest_input_fingerprint))
+        elif self._output.full_upstream_fingerprint != latest_full_upstream_fingerprint:
+            print(f"Should recompute output for {self.identity_key()} because full upstream fingerprint changed: {self._output.full_upstream_fingerprint} != {latest_full_upstream_fingerprint}")
             return True
         else:
-            return False
+            return False 
 
     def set_input(self, new_input: 'BaseNode.Input') -> None:
         if self.input is None:

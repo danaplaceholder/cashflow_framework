@@ -142,3 +142,9 @@ class NodeFingerprint(GraphElementFingerprint):
                 "created_by_diffs": created_by_diffs
             }
         return None
+
+
+class FullUpstreamFingerprint(BaseModel):
+        input_fingerprint: InputFingerprint | None = None
+        external_data_last_modified: int | None = None
+        created_by_fingerprint: NodeFingerprint | None = None

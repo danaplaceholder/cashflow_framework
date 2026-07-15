@@ -5,6 +5,7 @@ from base import BaseDataElement, BaseNode, Input, Output, GraphElementConfig
 from pydantic import PrivateAttr
 from pydantic import BaseModel
 import time
+from abc import abstractmethod
 #------------------------------------------Example------------------------------------------
 class Trade(BaseDataElement):
     symbol: str
@@ -37,6 +38,19 @@ class DataAccessNode(BaseNode):
     def _compute_output(self) -> Output:
         pass
 
+    @abstractmethod
+    def get_external_data_last_modified(self) -> int:
+        raise NotImplementedError("Subclasses must implement this method")
+
+class ComputationOnlyNode(BaseNode):
+    class Input(Input):
+        pass
+    class Output(Output):
+        pass
+    def _compute_output(self) -> Output:
+        pass
+    def get_external_data_last_modified(self) -> int | None:
+        return None
 
 TRADES_IN_DB_1 = {"last_modified": 1, "trades": [ 
             Trade(symbol="AAPL", trade_id="1", direction="Buy", volume=100, price=150.75),
@@ -66,63 +80,42 @@ ALL_SYMBOL_ONTOLOGY_3 = {"symbol_ontology": [
 
         
 class GetAllTradesNode(DataAccessNode):
-    _last_modified: int = PrivateAttr(default=TRADES_IN_DB_1["last_modified"])
+    _external_data_last_modified: int | None = None
     class Output(Output):
         all_trades: list[Trade]
 
     def _compute_output(self) -> Output:
         output = self.Output(all_trades=TRADES_IN_DB_1["trades"])
-        self._last_modified = TRADES_IN_DB_1["last_modified"]
+        self._external_data_last_modified = TRADES_IN_DB_1["last_modified"]
         return output
 
-    def _inner_should_recompute_output(self) -> bool:
-        return self._last_modified != TRADES_IN_DB_1["last_modified"]
+    def get_external_data_last_modified(self) -> int:
+        return TRADES_IN_DB_1["last_modified"]
+
 
 class GetAllYesterdayPositionsNode(DataAccessNode):
     class Output(Output):
         all_yesterday_positions: list[Position]
+    
+    def get_external_data_last_modified(self) -> int:
+        return None # should be made real
+
     def _compute_output(self) -> Output:
         return self.Output(all_yesterday_positions=[
             Position(symbol="AAPL", position=100),
             Position(symbol="TSLA", position=50),
         ])
 class GetAllSymbolOntologyNode(DataAccessNode):
-    _last_modified: int = PrivateAttr(default=ALL_SYMBOL_ONTOLOGY_1["last_modified"])
+    _external_data_last_modified: int | None = None
     class Output(Output):
         all_symbol_ontology: list[SymbolOntology]
     def _compute_output(self) -> Output:
         return self.Output(all_symbol_ontology=ALL_SYMBOL_ONTOLOGY_1["symbol_ontology"])
-    def _inner_should_recompute_output(self) -> bool:
-        if self._last_modified != ALL_SYMBOL_ONTOLOGY_1["last_modified"]:
-            return True
-        else:
-            return False
+    def get_external_data_last_modified(self) -> int:
+        return ALL_SYMBOL_ONTOLOGY_1["last_modified"]
 
-class GetSymbolOntologyNode(BaseNode):
-    config: SymbolConfig
-    class Input(Input):
-        get_all_symbol_ontology_node: GetAllSymbolOntologyNode
-    class Output(Output):
-        symbol_ontology: SymbolOntology
-    def _compute_output(self) -> Output:
-        for symbol_ontology in self.input.get_all_symbol_ontology_node.output.all_symbol_ontology:
-            if symbol_ontology.symbol == self.config.symbol:
-                return self.Output(symbol_ontology=symbol_ontology)
-        return self.Output(symbol_ontology=None)
-    
-class GetSymbolYesterdayPositionNode(BaseNode):
-    config: SymbolConfig
-    class Input(Input):
-        get_all_yesterday_positions_node: GetAllYesterdayPositionsNode
-    class Output(Output):
-        symbol_yesterday_position: Position
-    def _compute_output(self) -> Output:
-        for position in self.input.get_all_yesterday_positions_node.output.all_yesterday_positions:
-            if position.symbol == self.config.symbol:
-                return self.Output(symbol_yesterday_position=position)
-        return self.Output(symbol_yesterday_position=None)
 
-class GetSymbolTodayTradesNode(BaseNode):
+class GetSymbolTodayTradesNode(ComputationOnlyNode):
     config: SymbolConfig
     class Input(Input):
         get_all_trades_node: GetAllTradesNode
@@ -130,7 +123,7 @@ class GetSymbolTodayTradesNode(BaseNode):
         symbol_today_trades: list[Trade]
     def _compute_output(self) -> Output:
         return self.Output(symbol_today_trades=[trade for trade in self.input.get_all_trades_node.output.all_trades if trade.symbol == self.config.symbol])
-class AnalyzeSymbolTradesNode(BaseNode):
+class AnalyzeSymbolTradesNode(ComputationOnlyNode):
     config: SymbolConfig
     class Input(Input):
         get_symbol_today_trades_node: GetSymbolTodayTradesNode
@@ -139,7 +132,7 @@ class AnalyzeSymbolTradesNode(BaseNode):
     def _compute_output(self) -> Output:
         symbol_trade_analysis = SymbolTradeAnalysis(symbol=self.config.symbol, number_trades=len(self.input.get_symbol_today_trades_node.output.symbol_today_trades), average_price=sum([trade.price for trade in self.input.get_symbol_today_trades_node.output.symbol_today_trades]) / len(self.input.get_symbol_today_trades_node.output.symbol_today_trades))
         return self.Output(symbol_trade_analysis=symbol_trade_analysis)
-class SymbolTradeAnalysisNode(BaseNode):
+class SymbolTradeAnalysisNode(ComputationOnlyNode):
     config: SymbolConfig
     class Input(Input):
         get_all_today_trades_node: GetAllTradesNode
@@ -152,7 +145,7 @@ class SymbolTradeAnalysisNode(BaseNode):
         return self.Output(
             get_symbol_today_trades_node=get_symbol_today_trades_node,
             analyze_symbol_trades_node=analyze_symbol_trades_node,)
-class SymbolsWithActiveTradesNode(BaseNode):
+class SymbolsWithActiveTradesNode(ComputationOnlyNode):
     class Input(Input):
         get_all_trades_node: GetAllTradesNode
     class Output(Output):
@@ -169,7 +162,7 @@ class SymbolsWithActiveTradesNode(BaseNode):
             )) for symbol in all_unique_symbols]
         return self.Output(symbol_trade_analysis_nodes=symbol_trade_analysis_nodes)
 
-class UpdatePositionsNode(BaseNode):
+class UpdatePositionsNode(ComputationOnlyNode):
     class Input(Input):
         get_all_yesterday_positions_node: GetAllYesterdayPositionsNode
         new_trade_symbols_node: SymbolsWithActiveTradesNode
@@ -186,7 +179,7 @@ class UpdatePositionsNode(BaseNode):
 
 class FirmEconomics(BaseModel):
     sum_of_positions: float
-class FirmEconomicsNode(BaseNode):
+class FirmEconomicsNode(ComputationOnlyNode):
     class Input(Input):
         update_positions_node: UpdatePositionsNode
         all_symbol_ontology_node: GetAllSymbolOntologyNode
@@ -195,7 +188,7 @@ class FirmEconomicsNode(BaseNode):
     def _compute_output(self) -> Output:
         sum_of_positions = sum([position.position for position in self.input.update_positions_node.output.updated_positions])
         return self.Output(firm_economics=FirmEconomics(sum_of_positions=sum_of_positions))
-class TradeAnalysisNode(BaseNode):
+class TradeAnalysisNode(ComputationOnlyNode):
     class Output(Output):
         all_today_trades_node: GetAllTradesNode
         all_yesterday_positions_node: GetAllYesterdayPositionsNode
