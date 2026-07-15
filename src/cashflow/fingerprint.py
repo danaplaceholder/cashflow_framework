@@ -96,6 +96,8 @@ class CollectionFingerprint(GraphElementFingerprint):
             elif old_value != new_value:
                 diffs.append(old_value._inner_compare(new_value))
         return diffs
+
+
             
 
 class DataFingerprint(GraphElementFingerprint):

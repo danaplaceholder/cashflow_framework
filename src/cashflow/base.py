@@ -5,45 +5,42 @@ from pydantic import Field
 import time
 import logging
 from enum import StrEnum
-from cashflow.base2 import DataFingerprint, NodeFingerprint, InputFingerprint, OutputFingerprint
+from cashflow.fingerprint import DataFingerprint, NodeFingerprint, InputFingerprint, OutputFingerprint, CollectionFingerprint
 from pprint import pprint
 class GraphStateError(Exception):
     pass
 
-class Input(BaseModel):
+class Collection(BaseModel):
+        
+    def single_layer_fingerprint(self ) -> 'CollectionFingerprint':
+        running_dict = {}
+        for field_name, _ in self.__class__.model_fields.items():
+            value = getattr(self, field_name)
+            if isinstance(value, list) :
+                running_dict[field_name] = [item.single_layer_fingerprint() for item in value]
+            else:
+                running_dict[field_name] = value.single_layer_fingerprint()
+        return self.__class__.make_fingerprint(running_dict)
 
-
-        def recursive_fingerprint(self ) -> InputFingerprint:
-            running_dict = {}
-            for field_name, _ in self.__class__.model_fields.items():
-                value = getattr(self, field_name)
-                if isinstance(value, list) and len(value) and issubclass(value[0].__class__, BaseNode):
-                    result = []
-                    for node in value:
-                        node_input = node.input
-                        node_output = node.output
-                        node_fingerprint = NodeFingerprint(
-                            identity_key=node.identity_key(), 
-                            input_fingerprint=node_input.recursive_fingerprint() if node_input is not None else None,
-                            created_by_fingerprint=node.created_by_fingerprint(),
-                            output_fingerprint=node_output.recursive_fingerprint() if node_output is not None else None,
-                        )
-                        result.append(node_fingerprint)
-                    running_dict[field_name] = result
+    def recursive_fingerprint(self ) -> 'CollectionFingerprint':
+        running_dict = {}
+        for field_name, _ in self.__class__.model_fields.items():
+            value = getattr(self, field_name)
+            if isinstance(value, list) :
+                running_dict[field_name] = [item.recursive_fingerprint() for item in value]
+            else:
+                running_dict[field_name] = value.recursive_fingerprint()
             
-                elif issubclass(value.__class__, BaseNode):
-                    node_input = value.input
-                    node_output = value.output
-                    node_fingerprint = NodeFingerprint(
-                        identity_key=value.identity_key(), 
-                        input_fingerprint=node_input.recursive_fingerprint() if node_input is not None else None,
-                        created_by_fingerprint=value.created_by_fingerprint(),
-                        output_fingerprint=node_output.recursive_fingerprint() if node_output is not None else None,
-                    ) 
-                    running_dict[field_name] = node_fingerprint
-                else:
-                    raise ValueError(f"Invalid type for {field_name}: {type(value)}")
-                
+        return self.__class__.make_fingerprint(running_dict)
+    
+    @classmethod
+    def make_fingerprint(cls, running_dict: dict[str, DataFingerprint | NodeFingerprint | list[DataFingerprint | NodeFingerprint] | None]) -> 'CollectionFingerprint':
+        raise NotImplementedError("Subclasses must implement this method")
+
+class Input(Collection):
+        
+        @classmethod
+        def make_fingerprint(cls, running_dict: dict[str, DataFingerprint | NodeFingerprint | list[DataFingerprint | NodeFingerprint] | None]) -> InputFingerprint:
             return InputFingerprint(identity_key="some_input", field_fingerprint_dict=running_dict)
                     
         def update(self, new_input: 'BaseNode.Input') -> None:
@@ -74,81 +71,10 @@ class Input(BaseModel):
                         setattr(self, field_name, new_input_value)
                         
 
-class Output(BaseModel):
+class Output(Collection):
         _input_fingerprint: InputFingerprint = PrivateAttr(default=None)
-
-        def single_layer_fingerprint(self ) -> OutputFingerprint:
-            running_dict = {}
-            for field_name, _ in self.__class__.model_fields.items():
-                value = getattr(self, field_name)
-                if isinstance(value, list) and len(value):
-                    if issubclass(value[0].__class__, BaseNode):
-                        running_dict[field_name] = [
-                            NodeFingerprint(
-                                identity_key=item.identity_key(), 
-                                input_fingerprint=item.input.recursive_fingerprint() if item.input is not None else None,
-                                created_by_fingerprint=None, #item.created_by_fingerprint(),
-                                output_fingerprint=None,
-                            ) for item in value
-                        ]
-                    elif issubclass(value[0].__class__, BaseDataElement):
-                        running_dict[field_name] = [
-                            DataFingerprint(
-                                identity_key=item.identity_key(), 
-                                data_hash=item.data_hash(),
-                            ) for item in value
-                        ]
-                elif issubclass(value.__class__, BaseNode):
-                    running_dict[field_name] = NodeFingerprint(
-                        identity_key=value.identity_key(), 
-                        input_fingerprint=None, #value.input.recursive_fingerprint() if value.input is not None else None,
-                        created_by_fingerprint=None, #value.created_by_fingerprint(),
-                        output_fingerprint=None,
-                    )
-                elif isinstance(value, BaseDataElement):
-                    running_dict[field_name] = DataFingerprint(
-                        identity_key=value.identity_key(), 
-                        data_hash=value.data_hash(),
-                    )
-            return OutputFingerprint(identity_key="some_output", field_fingerprint_dict=running_dict)
-
-        def recursive_fingerprint(self ) -> OutputFingerprint:
-            running_dict = {}
-            for field_name, _ in self.__class__.model_fields.items():
-                value = getattr(self, field_name)
-                if isinstance(value, list) and len(value):
-                    if issubclass(value[0].__class__, BaseNode):
-                        result = []
-                        for item in value:
-                            item_input = item.input
-                            item_output = item.output
-                            item_fingerprint = NodeFingerprint(
-                                identity_key=item.identity_key(), 
-                                input_fingerprint=item_input.recursive_fingerprint() if item_input is not None else None,
-                                created_by_fingerprint=item.created_by_fingerprint(),
-                                output_fingerprint=item_output.recursive_fingerprint() if item_output is not None else None,
-                            )
-                            result.append(item_fingerprint)
-                        running_dict[field_name] = result
-                    elif issubclass(value[0].__class__, BaseDataElement):
-                        running_dict[field_name] = [DataFingerprint(
-                            identity_key=item.identity_key(), 
-                            data_hash=item.data_hash(),
-                        ) for item in value]
-                elif issubclass(value.__class__, BaseNode):
-                    item_input = value.input
-                    item_output = value.output
-                    running_dict[field_name] = NodeFingerprint(
-                        identity_key=value.identity_key(), 
-                        input_fingerprint=item_input.recursive_fingerprint() if item_input is not None else None,
-                        created_by_fingerprint=value.created_by_fingerprint(),
-                        output_fingerprint=item_output.recursive_fingerprint() if item_output is not None else None,
-                    )
-                elif isinstance(value, BaseDataElement):
-                    running_dict[field_name] = DataFingerprint(
-                        identity_key=value.identity_key(), 
-                        data_hash=value.data_hash(),
-                    )
+        @classmethod
+        def make_fingerprint(cls, running_dict: dict[str, DataFingerprint | NodeFingerprint | list[DataFingerprint | NodeFingerprint] | None]) -> OutputFingerprint:
             return OutputFingerprint(identity_key="some_output", field_fingerprint_dict=running_dict)
         @property
         def input_fingerprint(self) -> InputFingerprint:
@@ -234,6 +160,14 @@ class BaseDataElement(BaseGraphElement):
 
     def data_hash(self) -> str:
         return self.identity_key() 
+    
+    def single_layer_fingerprint(self) -> DataFingerprint:
+        return DataFingerprint(
+            identity_key=self.identity_key(), 
+            data_hash=self.data_hash(),
+        )
+    def recursive_fingerprint(self) -> DataFingerprint:
+        return self.single_layer_fingerprint() # same as single layer fingerprint for data elements
 class BaseNode(BaseGraphElement):
     # TODO Caching layer ? 
     created_by: 'BaseNode' = None
@@ -247,6 +181,22 @@ class BaseNode(BaseGraphElement):
     def fingerprint(self) -> NodeFingerprint:
         return self._fingerprint
 
+    def single_layer_fingerprint(self) -> NodeFingerprint:
+        return NodeFingerprint(
+            identity_key=self.identity_key(), 
+            input_fingerprint=self.input.single_layer_fingerprint() if self.input is not None else None, #self.input.recursive_fingerprint() if self.input is not None else None,
+            created_by_fingerprint=None, #self.created_by_fingerprint(),
+            output_fingerprint=None,
+        )
+    def recursive_fingerprint(self) -> DataFingerprint:
+        item_input = self.input
+        item_output = self.output
+        return NodeFingerprint(
+            identity_key=self.identity_key(), 
+            input_fingerprint=item_input.recursive_fingerprint() if item_input is not None else None,
+            created_by_fingerprint=self.created_by_fingerprint(),
+            output_fingerprint=item_output.recursive_fingerprint() if item_output is not None else None,
+        )
     @property
     def root_node(self) -> 'BaseNode':
         if self.created_by is None:
@@ -276,13 +226,14 @@ class BaseNode(BaseGraphElement):
     def created_by_fingerprint(self) -> NodeFingerprint:
         if self.created_by is None:
             return None
-        created_by_input = self.created_by.input if self.created_by.input is not None else None
-        created_by_output = self.created_by._output if self.created_by._output is not None else None
+
+        created_by_input = self.created_by.input
+        created_by_output = self.created_by.output
         return NodeFingerprint(
             identity_key=self.created_by.identity_key(),
             input_fingerprint=created_by_input.recursive_fingerprint() if created_by_input is not None else None,
             created_by_fingerprint=self.created_by.created_by_fingerprint() if self.created_by.created_by is not None else None,
-            output_fingerprint=created_by_output.single_layer_fingerprint() if created_by_output is not None else None,
+            output_fingerprint= created_by_output.single_layer_fingerprint() if created_by_output is not None else None, # only single layer since just interested in what created_by creates, not what its internal nodes create 
         )
 
     def refresh_created_by(self) -> None:
