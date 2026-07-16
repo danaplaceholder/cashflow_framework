@@ -140,8 +140,8 @@ class SymbolTradeAnalysisNode(ComputationOnlyNode):
         get_symbol_today_trades_node: GetSymbolTodayTradesNode
         analyze_symbol_trades_node: AnalyzeSymbolTradesNode
     def _compute_output(self) -> Output:
-        get_symbol_today_trades_node = GetSymbolTodayTradesNode(created_by=self, config=self.config, input=GetSymbolTodayTradesNode.Input(get_all_trades_node=self.input.get_all_today_trades_node))
-        analyze_symbol_trades_node = AnalyzeSymbolTradesNode(created_by=self, config=self.config, input=AnalyzeSymbolTradesNode.Input(get_symbol_today_trades_node=get_symbol_today_trades_node))
+        get_symbol_today_trades_node = GetSymbolTodayTradesNode( config=self.config, input=GetSymbolTodayTradesNode.Input(get_all_trades_node=self.input.get_all_today_trades_node))
+        analyze_symbol_trades_node = AnalyzeSymbolTradesNode( config=self.config, input=AnalyzeSymbolTradesNode.Input(get_symbol_today_trades_node=get_symbol_today_trades_node))
         return self.Output(
             get_symbol_today_trades_node=get_symbol_today_trades_node,
             analyze_symbol_trades_node=analyze_symbol_trades_node,)
@@ -155,7 +155,6 @@ class SymbolsWithActiveTradesNode(ComputationOnlyNode):
         all_unique_symbols = set([trade.symbol for trade in self.input.get_all_trades_node.output.all_trades])
         symbol_trade_analysis_nodes = [
             SymbolTradeAnalysisNode(
-                created_by=self,
                 config=SymbolConfig(symbol=symbol), 
                 input=SymbolTradeAnalysisNode.Input(
                     get_all_today_trades_node=self.input.get_all_trades_node,
@@ -198,13 +197,12 @@ class TradeAnalysisNode(ComputationOnlyNode):
         firm_economics_node: FirmEconomicsNode
 
     def _compute_output(self) -> Output:
-        all_today_trades_node = GetAllTradesNode(created_by=self)
-        all_yesterday_positions_node = GetAllYesterdayPositionsNode(created_by=self)
-        new_trade_symbols_node = SymbolsWithActiveTradesNode(created_by=self, input=SymbolsWithActiveTradesNode.Input(get_all_trades_node=all_today_trades_node))
-        all_symbol_ontology_node = GetAllSymbolOntologyNode(created_by=self)
-        update_positions_node = UpdatePositionsNode(created_by=self, input=UpdatePositionsNode.Input(get_all_yesterday_positions_node=all_yesterday_positions_node, new_trade_symbols_node=new_trade_symbols_node))
+        all_today_trades_node = GetAllTradesNode()
+        all_yesterday_positions_node = GetAllYesterdayPositionsNode()
+        new_trade_symbols_node = SymbolsWithActiveTradesNode( input=SymbolsWithActiveTradesNode.Input(get_all_trades_node=all_today_trades_node))
+        all_symbol_ontology_node = GetAllSymbolOntologyNode()
+        update_positions_node = UpdatePositionsNode( input=UpdatePositionsNode.Input(get_all_yesterday_positions_node=all_yesterday_positions_node, new_trade_symbols_node=new_trade_symbols_node))
         firm_economics_node = FirmEconomicsNode(
-            created_by=self,
             input=FirmEconomicsNode.Input(
                 update_positions_node=update_positions_node,
                 all_symbol_ontology_node=all_symbol_ontology_node,
