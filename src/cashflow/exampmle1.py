@@ -1,8 +1,9 @@
 """
 trading data pipeline with dashed dependencies
+by Dana K
+NOT by ai
 """
 from base import BaseDataElement, BaseNode, Input, Output, GraphElementConfig
-from pydantic import PrivateAttr
 from pydantic import BaseModel
 import time
 from abc import abstractmethod

@@ -1,3 +1,8 @@
+"""
+fingerprint for graph elements
+by Dana K
+NOT by ai
+"""
 from pydantic import PrivateAttr
 from pydantic import BaseModel
 from datetime import datetime
@@ -36,9 +41,13 @@ class GraphElementFingerprint(BaseModel):
     def _inner_update(self, new_fingerprint: 'GraphElementFingerprint') -> None:
         raise NotImplementedError("Subclasses must implement this method")
 
-    def __eq__( self, other: 'GraphElementFingerprint') -> bool:
-        return self.identity_key == other.identity_key and not self._inner_compare(other) 
+    def underlying_data_match( self, other: 'GraphElementFingerprint') -> bool:
+        """
+        Returns True if the underlying data of the two fingerprints match, potential temporary data changes
+        """
+        return self.identity_key == other.identity_key and not self._inner_compare(other, ignore_external_data_last_modified=True) 
         
+
 
 class CollectionFingerprint(GraphElementFingerprint):
     def _inner_update(self, new_fingerprint: 'OutputFingerprint') -> None:
@@ -69,7 +78,7 @@ class CollectionFingerprint(GraphElementFingerprint):
                 self.field_fingerprint_dict[field_name] = updated_list
             elif old_value != new_value:
                 self.field_fingerprint_dict[field_name].update(new_value)
-    def _inner_compare(self,  new_fingerprint: 'GraphElementFingerprint') -> None:
+    def _inner_compare(self,  new_fingerprint: 'GraphElementFingerprint', ignore_external_data_last_modified: bool) -> None:
         diffs = []
         for field_name in self.field_fingerprint_dict.keys():
             old_value = self.field_fingerprint_dict.get(field_name)
@@ -85,7 +94,7 @@ class CollectionFingerprint(GraphElementFingerprint):
                     if identity_key not in new_identity_key_dict:
                         diffs.append((f"{self.identity_key}:{field_name} - {identity_key}:Node deleted"))
                     elif new_identity_key_dict[identity_key] != old_node_fingerprint:
-                        diffs.append(old_node_fingerprint._inner_compare(new_identity_key_dict[identity_key]))
+                        diffs.append(old_node_fingerprint._inner_compare(new_identity_key_dict[identity_key], ignore_external_data_last_modified=ignore_external_data_last_modified))
                     else:
                         continue
                 for identity_key, new_node_fingerprint in new_identity_key_dict.items():
@@ -94,7 +103,7 @@ class CollectionFingerprint(GraphElementFingerprint):
                     else:
                         continue
             elif old_value != new_value:
-                diffs.append(old_value._inner_compare(new_value))
+                diffs.append(old_value._inner_compare(new_value, ignore_external_data_last_modified=ignore_external_data_last_modified))
         return diffs
 
 
@@ -106,7 +115,7 @@ class DataFingerprint(GraphElementFingerprint):
     def _inner_update(self, new_fingerprint: 'DataFingerprint') -> None:
         if self.data_hash != new_fingerprint.data_hash:
             self.data_hash = new_fingerprint.data_hash
-    def _inner_compare(self, new_fingerprint: 'DataFingerprint') -> None:
+    def _inner_compare(self, new_fingerprint: 'DataFingerprint', ignore_external_data_last_modified: bool) -> None:
         if self.data_hash != new_fingerprint.data_hash:
             return [(self.data_hash, new_fingerprint.data_hash)]
         return []
@@ -120,26 +129,33 @@ class NodeFingerprint(GraphElementFingerprint):
     identity_key: str
     input_fingerprint: InputFingerprint | None = None
     output_fingerprint: OutputFingerprint | None = None
+    external_data_last_modified: int | None = None
     created_by_fingerprint: 'NodeFingerprint | None' = None
 
     def _inner_update(self, new_fingerprint: 'NodeFingerprint') -> None:
-        if self.input_fingerprint != new_fingerprint.input_fingerprint:
+        if not self.input_fingerprint.underlying_data_match(new_fingerprint.input_fingerprint):
             self.input_fingerprint.update(new_fingerprint.input_fingerprint)
-        if self.output_fingerprint != new_fingerprint.output_fingerprint:
+        if not self.output_fingerprint.underlying_data_match(new_fingerprint.output_fingerprint):
             self.output_fingerprint.update(new_fingerprint.output_fingerprint)
-        if self.created_by_fingerprint != new_fingerprint.created_by_fingerprint:
+        if not self.created_by_fingerprint.underlying_data_match(new_fingerprint.created_by_fingerprint):
             self.created_by_fingerprint.update(new_fingerprint.created_by_fingerprint)
-
-    def _inner_compare(self, new_fingerprint: 'NodeFingerprint') -> dict[str, list[str]] | None:
-        input_diffs = self.input_fingerprint._inner_compare(new_fingerprint.input_fingerprint) if self.input_fingerprint is not None else None
-        output_diffs = self.output_fingerprint._inner_compare(new_fingerprint.output_fingerprint) if self.output_fingerprint is not None else None
-        created_by_diffs = self.created_by_fingerprint._inner_compare(new_fingerprint.created_by_fingerprint) if self.created_by_fingerprint is not None else None
-        if input_diffs or output_diffs or created_by_diffs:
+        if self.external_data_last_modified != new_fingerprint.external_data_last_modified:
+            self.external_data_last_modified = new_fingerprint.external_data_last_modified
+    def _inner_compare(self, new_fingerprint: 'NodeFingerprint', ignore_external_data_last_modified: bool) -> dict[str, list[str]] | None:
+        input_diffs = self.input_fingerprint._inner_compare(new_fingerprint.input_fingerprint, ignore_external_data_last_modified=ignore_external_data_last_modified) if self.input_fingerprint is not None else None
+        output_diffs = self.output_fingerprint._inner_compare(new_fingerprint.output_fingerprint, ignore_external_data_last_modified=ignore_external_data_last_modified) if self.output_fingerprint is not None else None
+        created_by_diffs = self.created_by_fingerprint._inner_compare(new_fingerprint.created_by_fingerprint, ignore_external_data_last_modified=ignore_external_data_last_modified) if self.created_by_fingerprint is not None else None
+        if not ignore_external_data_last_modified:
+            external_data_last_modified_diffs = (self.external_data_last_modified, new_fingerprint.external_data_last_modified) if self.external_data_last_modified != new_fingerprint.external_data_last_modified else None
+        else:
+            external_data_last_modified_diffs = None
+        if input_diffs or output_diffs or created_by_diffs or external_data_last_modified_diffs:
             return {
                 "identity_key": self.identity_key,
                 "input_diffs": input_diffs,
                 "output_diffs": output_diffs,
-                "created_by_diffs": created_by_diffs
+                "created_by_diffs": created_by_diffs,
+                "external_data_last_modified_diffs": external_data_last_modified_diffs
             }
         return None
 
@@ -148,3 +164,24 @@ class FullUpstreamFingerprint(BaseModel):
         input_fingerprint: InputFingerprint | None = None
         external_data_last_modified: int | None = None
         created_by_fingerprint: NodeFingerprint | None = None
+    
+        def has_been_modified(self, other: 'FullUpstreamFingerprint') -> bool:
+            if self.input_fingerprint is not None:
+                if self.input_fingerprint._inner_compare(other.input_fingerprint, ignore_external_data_last_modified=False):
+                    return True
+            if self.external_data_last_modified != other.external_data_last_modified:
+                    return True
+            if self.created_by_fingerprint is not None:
+                if self.created_by_fingerprint._inner_compare(other.created_by_fingerprint, ignore_external_data_last_modified=False):
+                    return True
+            return False
+      
+        def get_diffs(self, other: 'FullUpstreamFingerprint') -> dict[str, list[str]] | None:
+            diffs = []
+            if self.input_fingerprint is not None:
+                diffs.append(self.input_fingerprint._inner_compare(other.input_fingerprint, ignore_external_data_last_modified=True))
+            if self.external_data_last_modified != other.external_data_last_modified:
+                diffs.append((self.external_data_last_modified, other.external_data_last_modified))
+            if self.created_by_fingerprint is not None:
+                diffs.append(self.created_by_fingerprint._inner_compare(other.created_by_fingerprint, ignore_external_data_last_modified=True))
+            return diffs

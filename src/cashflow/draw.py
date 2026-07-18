@@ -1,5 +1,7 @@
 """
 graph visualizer/drawing
+by Dana K
+by ai
 """
 from base import BaseNode, ElementStatus
 import graphviz

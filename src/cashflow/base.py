@@ -1,12 +1,9 @@
-from re import L
 from pydantic import BaseModel
 from pydantic import PrivateAttr
 from pydantic import Field
-import time
 import logging
 from enum import StrEnum
 from cashflow.fingerprint import DataFingerprint, NodeFingerprint, InputFingerprint, OutputFingerprint, CollectionFingerprint, FullUpstreamFingerprint
-from pprint import pprint
 from abc import ABC, abstractmethod
 class GraphStateError(Exception):
     pass
@@ -216,6 +213,7 @@ class BaseNode(BaseGraphElement):
             input_fingerprint=self.input.element_identity_fingerprint() if self.input is not None else None, #self.input.recursive_fingerprint() if self.input is not None else None,
             created_by_fingerprint=None,
             output_fingerprint=None,
+            external_data_last_modified=None,
         )
     def recursive_fingerprint(self) -> DataFingerprint:
         item_input = self.input
@@ -225,6 +223,7 @@ class BaseNode(BaseGraphElement):
             input_fingerprint=item_input.recursive_fingerprint() if item_input is not None else None,
             created_by_fingerprint=self.created_by_fingerprint(),
             output_fingerprint=item_output.recursive_fingerprint() if item_output is not None else None,
+            external_data_last_modified=self.get_external_data_last_modified()
         )
 
     def get_external_data_last_modified(self) -> int | None:
@@ -262,11 +261,14 @@ class BaseNode(BaseGraphElement):
 
         created_by_input = self.created_by.input
         created_by_output = self.created_by.output
+        if not created_by_output.contains(self):
+            raise ValueError(f"Node {self.config_hash()} of class {self.__class__.__name__} should not exist. This can happen if you specifically ask for a node that has been deleted but should not happen asynchronously.")
         return NodeFingerprint(
             identity_key=self.created_by.identity_key(),
             input_fingerprint=created_by_input.recursive_fingerprint() if created_by_input is not None else None,
             created_by_fingerprint=self.created_by.created_by_fingerprint() if self.created_by.created_by is not None else None,
             output_fingerprint= created_by_output.element_identity_fingerprint() if created_by_output is not None else None, # only single layer since just interested in what created_by creates, not what its internal nodes create 
+            external_data_last_modified=self.created_by.get_external_data_last_modified(),
         )
 
 
@@ -289,16 +291,11 @@ class BaseNode(BaseGraphElement):
 
     @property                       
     def output(self) -> Output:     
-        if not self.should_exist(): # triggers refresh of created_by
-            raise ValueError(f"Node {self.config_hash()} of class {self.__class__.__name__} should not exist. This can happen if you specifically ask for a node that has been deleted but should not happen asynchronously.")
-        else:
+ 
             latest_full_upstream_fingerprint = self.full_upstream_fingerprint()
-            if self._output is None:
+            if self._output is None or self._outer_should_recompute_output(latest_full_upstream_fingerprint=latest_full_upstream_fingerprint):
                 self._outer_compute_output(pre_compute_full_upstream_fingerprint=latest_full_upstream_fingerprint)
-            else:
-                if self._outer_should_recompute_output(latest_full_upstream_fingerprint=latest_full_upstream_fingerprint):
-                    self._outer_compute_output(pre_compute_full_upstream_fingerprint=latest_full_upstream_fingerprint)
-                
+
             return self._output
 
     def identity_key(self) -> str:
@@ -337,7 +334,7 @@ class BaseNode(BaseGraphElement):
 
         # check if upstream data changed since computation
         post_compute_full_upstream_fingerprint = self.full_upstream_fingerprint()
-        if pre_compute_full_upstream_fingerprint != post_compute_full_upstream_fingerprint:
+        if pre_compute_full_upstream_fingerprint.has_been_modified(post_compute_full_upstream_fingerprint):
             logging.warning(f"Full upstream fingerprint changed after computation for {self.identity_key()}....recomputing")
             self._outer_compute_output(pre_compute_full_upstream_fingerprint=post_compute_full_upstream_fingerprint)
         
@@ -353,22 +350,6 @@ class BaseNode(BaseGraphElement):
             # mark as completed
             self.set_status(ElementStatus.COMPLETED)
 
-    def check_all_upstream_node_versions_for_current_output(self) -> bool:
-        """
-        Walk up the input tree(s) for this node and check for multiple versions of the same node_x being used in the current _output of different paths
-        Also make sure we really have kept track of the whole trail all along ..... 
-        """
-
-    def should_exist(self ) -> bool:
-        if self._status == ElementStatus.DELETED:
-            return False
-        else:
-            if self.created_by is None:
-                return True
-            elif self.created_by.should_exist():
-                return self.created_by.output.contains(self)
-            else:
-                return False
           
     def set_status_deleted(self) -> None:
         self._status = ElementStatus.DELETED
@@ -382,17 +363,14 @@ class BaseNode(BaseGraphElement):
             elif isinstance(value, BaseNode):
                 value.set_status_deleted()
         
-    def _inner_should_recompute_output(self) -> bool:
-        # TODO: implement this
-        return False
-
     def _outer_should_recompute_output(self, latest_full_upstream_fingerprint: FullUpstreamFingerprint) -> bool:
 
         if self._output is None:
             print(f"Should recompute output for {self.identity_key()} because output is None")
             return True
-        elif self._output.full_upstream_fingerprint != latest_full_upstream_fingerprint:
-            print(f"Should recompute output for {self.identity_key()} because full upstream fingerprint changed: {self._output.full_upstream_fingerprint} != {latest_full_upstream_fingerprint}")
+        elif not self._output.full_upstream_fingerprint.underlying_data_match(latest_full_upstream_fingerprint): # uses __eq__, IGNORES last_modified/temporary data changes
+            diffs = self._output.full_upstream_fingerprint.get_diffs(latest_full_upstream_fingerprint)
+            print(f"Should recompute output for {self.identity_key()} because full upstream fingerprint changed: {diffs}")
             return True
         else:
             return False 
