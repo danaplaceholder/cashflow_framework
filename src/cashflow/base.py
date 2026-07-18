@@ -5,6 +5,8 @@ import logging
 from enum import StrEnum
 from cashflow.fingerprint import DataFingerprint, NodeFingerprint, InputFingerprint, OutputFingerprint, CollectionFingerprint, FullUpstreamFingerprint
 from abc import ABC, abstractmethod
+from pprint import pprint
+import hashlib
 class GraphStateError(Exception):
     pass
 
@@ -156,7 +158,7 @@ class GraphElementConfig(BaseModel):
         created_by: 'BaseNode' = None
         element_name: str = Field(default=None)
         def hash(self) -> str:
-            return ''.join([field_name+str(getattr(self, field_name)) for field_name, field_info in self.__class__.model_fields.items() if getattr(self, field_name) is not None])
+            return hashlib.sha256(''.join([field_name+str(getattr(self, field_name)) for field_name, field_info in self.__class__.model_fields.items() if getattr(self, field_name) is not None]).encode('utf-8')).hexdigest()[:10]
 
 class BaseGraphElement(BaseModel, ABC):
     _created_by: 'BaseNode' = PrivateAttr(default=None)
@@ -249,7 +251,7 @@ class BaseNode(BaseGraphElement):
             build_graph(self.root_node)
 
     def config_hash(self) -> str:
-        return self.config.hash() if self.config else ""
+        return str(self.config) if self.config else ""
 
     def element_name(self) -> str:
         return self.__class__.__name__ + "_" +  self.config_hash() + "_STATUS_" + self._status.value
@@ -299,10 +301,10 @@ class BaseNode(BaseGraphElement):
             return self._output
 
     def identity_key(self) -> str:
-        return self.created_by_identity_key() + self.__class__.__name__ + self.config_hash()
+        return f"___{self.created_by_identity_key()}->{self.__class__.__name__}::{self.config_hash()}|"
 
     def created_by_identity_key(self) -> str:
-        return self.created_by.identity_key() if self.created_by else ""
+        return f"{self.created_by.identity_key()}" if self.created_by else ""
 
     def _compute_output(self) -> Output:
         raise NotImplementedError("Subclasses must implement this method")
@@ -370,7 +372,8 @@ class BaseNode(BaseGraphElement):
             return True
         elif not self._output.full_upstream_fingerprint.underlying_data_match(latest_full_upstream_fingerprint): # uses __eq__, IGNORES last_modified/temporary data changes
             diffs = self._output.full_upstream_fingerprint.get_diffs(latest_full_upstream_fingerprint)
-            print(f"Should recompute output for {self.identity_key()} because full upstream fingerprint changed: {diffs}")
+            pprint(f"\n \n Should recompute output for {self.identity_key()} because full upstream fingerprint changed")
+            pprint( diffs)
             return True
         else:
             return False 

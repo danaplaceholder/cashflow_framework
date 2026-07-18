@@ -192,7 +192,7 @@ class TimeSeries(BaseDataElement):
             bucket_config=self.bucket_config)
 
     def get_bucketing_hash(self) -> str:
-        return (self.bucket_config.hash,self.time_points.hash)
+        return f"{self.bucket_config.hash}:{self.time_points.hash}"
 
     @model_validator(mode="after")
     def _validate(self):

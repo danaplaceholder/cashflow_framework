@@ -78,32 +78,42 @@ class CollectionFingerprint(GraphElementFingerprint):
                 self.field_fingerprint_dict[field_name] = updated_list
             elif old_value != new_value:
                 self.field_fingerprint_dict[field_name].update(new_value)
-    def _inner_compare(self,  new_fingerprint: 'GraphElementFingerprint', ignore_external_data_last_modified: bool) -> None:
-        diffs = []
+    def _inner_compare(self,  new_fingerprint: 'GraphElementFingerprint', ignore_external_data_last_modified: bool) -> list:
+        diffs = {}
         for field_name in self.field_fingerprint_dict.keys():
+            field_diffs = []
             old_value = self.field_fingerprint_dict.get(field_name)
             new_value = new_fingerprint.field_fingerprint_dict.get(field_name)
             if old_value == new_value:
                 continue
             elif old_value is None or new_value is None:
-                diffs.append((field_name, old_value, new_value))
+                field_diffs.append((field_name, old_value, new_value))
             elif isinstance(old_value, list):
                 old_identity_key_dict = { node_fingerprint.identity_key: node_fingerprint for node_fingerprint in old_value }
                 new_identity_key_dict = { node_fingerprint.identity_key: node_fingerprint for node_fingerprint in new_value }
                 for identity_key, old_node_fingerprint in old_identity_key_dict.items():
                     if identity_key not in new_identity_key_dict:
-                        diffs.append((f"{self.identity_key}:{field_name} - {identity_key}:Node deleted"))
-                    elif new_identity_key_dict[identity_key] != old_node_fingerprint:
-                        diffs.append(old_node_fingerprint._inner_compare(new_identity_key_dict[identity_key], ignore_external_data_last_modified=ignore_external_data_last_modified))
+                        field_diffs.append({identity_key: "REFERENCE_REMOVED"})
                     else:
-                        continue
-                for identity_key, new_node_fingerprint in new_identity_key_dict.items():
+                        new_diffs = old_node_fingerprint._inner_compare(new_identity_key_dict[identity_key], ignore_external_data_last_modified=ignore_external_data_last_modified)
+                        if new_diffs:
+                            field_diffs.append(new_diffs)
+                    
+                for identity_key, _ in new_identity_key_dict.items():
                     if identity_key not in old_identity_key_dict:
-                        diffs.append((f"{self.identity_key}:{field_name} - {identity_key}:Node added"))
+                        field_diffs.append({identity_key: "REFERENCE_ADDED"})
                     else:
                         continue
-            elif old_value != new_value:
-                diffs.append(old_value._inner_compare(new_value, ignore_external_data_last_modified=ignore_external_data_last_modified))
+            else:
+                old_value = self.field_fingerprint_dict.get(field_name)
+                new_value = new_fingerprint.field_fingerprint_dict.get(field_name)
+                if old_value.identity_key != new_value.identity_key:
+                    field_diffs.append({"REFERENCED_CHANGED: FROM": old_value.identity_key, "TO": new_value.identity_key})
+                else:
+                    new_diffs = old_value._inner_compare(new_value, ignore_external_data_last_modified=ignore_external_data_last_modified)
+                    if new_diffs:
+                        field_diffs.append(new_diffs)
+            diffs[field_name] = field_diffs
         return diffs
 
 
@@ -117,7 +127,7 @@ class DataFingerprint(GraphElementFingerprint):
             self.data_hash = new_fingerprint.data_hash
     def _inner_compare(self, new_fingerprint: 'DataFingerprint', ignore_external_data_last_modified: bool) -> None:
         if self.data_hash != new_fingerprint.data_hash:
-            return [(self.data_hash, new_fingerprint.data_hash)]
+            return [{"OLD_DATA_HASH": self.data_hash, "NEW_DATA_HASH": new_fingerprint.data_hash}]
         return []
 
 class OutputFingerprint(CollectionFingerprint):
@@ -149,13 +159,17 @@ class NodeFingerprint(GraphElementFingerprint):
             external_data_last_modified_diffs = (self.external_data_last_modified, new_fingerprint.external_data_last_modified) if self.external_data_last_modified != new_fingerprint.external_data_last_modified else None
         else:
             external_data_last_modified_diffs = None
-        if input_diffs or output_diffs or created_by_diffs or external_data_last_modified_diffs:
+        if input_diffs or created_by_diffs or external_data_last_modified_diffs:
             return {
                 "identity_key": self.identity_key,
                 "input_diffs": input_diffs,
-                "output_diffs": output_diffs,
                 "created_by_diffs": created_by_diffs,
                 "external_data_last_modified_diffs": external_data_last_modified_diffs
+            }
+        elif output_diffs:
+            return {
+                "identity_key": self.identity_key,
+                "output_diffs": output_diffs,
             }
         return None
 
@@ -185,3 +199,20 @@ class FullUpstreamFingerprint(BaseModel):
             if self.created_by_fingerprint is not None:
                 diffs.append(self.created_by_fingerprint._inner_compare(other.created_by_fingerprint, ignore_external_data_last_modified=True))
             return diffs
+
+        def underlying_data_match(self, other: 'FullUpstreamFingerprint') -> bool:
+            """
+            Ignores external data last modified changes
+            """
+            if self.input_fingerprint is not None:
+                if not self.input_fingerprint.underlying_data_match(other.input_fingerprint):
+                    return False
+            elif self.external_data_last_modified != other.external_data_last_modified:
+                """
+                If the node itself uses external data that has since been modified, then the underlying data could possibly not match
+                """
+                return False
+            if self.created_by_fingerprint is not None:
+                if not self.created_by_fingerprint.underlying_data_match(other.created_by_fingerprint):
+                    return False
+            return True
