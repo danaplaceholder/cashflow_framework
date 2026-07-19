@@ -167,7 +167,7 @@ class SymbolsWithActiveTradesNode(ComputationOnlyNode):
         symbol_config_nodes = []
         symbol_trade_analysis_nodes = []
         for symbol in all_unique_symbols:
-            symbol_config_node = SymbolConfigNode(alias=symbol, output=SymbolConfigNode.Output(symbol=Symbol(name=symbol)), created_by=self)
+            symbol_config_node = SymbolConfigNode(alias=symbol, output=SymbolConfigNode.Output(symbol=Symbol(name=symbol)))
             symbol_trade_analysis_node = SymbolTradeAnalysisNode(
                 alias=symbol,
                 input=SymbolTradeAnalysisNode.Input(

@@ -429,6 +429,8 @@ class StaticOutputNode(BaseNode):
     def _compute_output(self) -> Output:
         raise ValueError("StaticOutputNode should not be computed")
     def set_input(self, new_input: 'BaseNode.Input') -> None:
+        if new_input is not None:
+            raise ValueError("StaticOutputNode should not have input")
         return
     def get_external_data_last_modified(self) -> int | None:
         None
