@@ -128,20 +128,21 @@ class GetSymbolTodayTradesNode(ComputationOnlyNode):
         symbol_config_node: SymbolConfigNode
         get_all_trades_node: GetAllTradesNode
     class Output(Output):
+        symbol: Symbol
         symbol_today_trades: list[Trade]
     def _compute_output(self) -> Output:
-        symbol = self.input.symbol_config_node.output.symbol.name
-        return self.Output(symbol_today_trades=[trade for trade in self.input.get_all_trades_node.output.all_trades if trade.symbol == symbol])
+        symbol = self.input.symbol_config_node.output.symbol
+        return self.Output(symbol=symbol, symbol_today_trades=[trade for trade in self.input.get_all_trades_node.output.all_trades if trade.symbol == symbol.name])
 class AnalyzeSymbolTradesNode(ComputationOnlyNode):
     class Input(Input):
-        symbol_config_node: SymbolConfigNode
         get_symbol_today_trades_node: GetSymbolTodayTradesNode
     class Output(Output):
+        symbol: Symbol
         symbol_trade_analysis: SymbolTradeAnalysis
     def _compute_output(self) -> Output:
-        symbol = self.input.symbol_config_node.output.symbol.name
-        symbol_trade_analysis = SymbolTradeAnalysis(symbol=symbol, number_trades=len(self.input.get_symbol_today_trades_node.output.symbol_today_trades), average_price=sum([trade.price for trade in self.input.get_symbol_today_trades_node.output.symbol_today_trades]) / len(self.input.get_symbol_today_trades_node.output.symbol_today_trades))
-        return self.Output(symbol_trade_analysis=symbol_trade_analysis)
+        symbol = self.input.get_symbol_today_trades_node.output.symbol
+        symbol_trade_analysis = SymbolTradeAnalysis(symbol=symbol.name, number_trades=len(self.input.get_symbol_today_trades_node.output.symbol_today_trades), average_price=sum([trade.price for trade in self.input.get_symbol_today_trades_node.output.symbol_today_trades]) / len(self.input.get_symbol_today_trades_node.output.symbol_today_trades))
+        return self.Output(symbol=symbol, symbol_trade_analysis=symbol_trade_analysis)
 class SymbolTradeAnalysisNode(ComputationOnlyNode):
     class Input(Input):
         symbol_config_node: SymbolConfigNode
@@ -151,7 +152,7 @@ class SymbolTradeAnalysisNode(ComputationOnlyNode):
         analyze_symbol_trades_node: AnalyzeSymbolTradesNode
     def _compute_output(self) -> Output:
         get_symbol_today_trades_node = GetSymbolTodayTradesNode(alias=self.input.symbol_config_node.output.symbol.name, input=GetSymbolTodayTradesNode.Input(symbol_config_node=self.input.symbol_config_node, get_all_trades_node=self.input.get_all_today_trades_node))
-        analyze_symbol_trades_node = AnalyzeSymbolTradesNode(alias=self.input.symbol_config_node.output.symbol.name, input=AnalyzeSymbolTradesNode.Input(symbol_config_node=self.input.symbol_config_node, get_symbol_today_trades_node=get_symbol_today_trades_node))
+        analyze_symbol_trades_node = AnalyzeSymbolTradesNode(alias=self.input.symbol_config_node.output.symbol.name, input=AnalyzeSymbolTradesNode.Input( get_symbol_today_trades_node=get_symbol_today_trades_node))
         return self.Output(
             get_symbol_today_trades_node=get_symbol_today_trades_node,
             analyze_symbol_trades_node=analyze_symbol_trades_node)

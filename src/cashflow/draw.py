@@ -31,6 +31,7 @@ color_key_legend[ElementStatus.UPDATING_OUTPUT] = "#577590"
 color_key_legend[ElementStatus.WAITING_FOR_INPUT] = "#f8961e"
 color_key_legend[ElementStatus.COMPLETED] = "#90be6d"
 color_key_legend[ElementStatus.DELETED] = "#f94144"
+color_key_legend[ElementStatus.STATIC] = "#000000"
 color_black = "#000000"
 color_cluster_fill = "#F1EFE8"
 

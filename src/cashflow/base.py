@@ -416,11 +416,10 @@ class BaseNode(BaseGraphElement):
 
     
 class StaticOutputNode(BaseNode):
-    def __init__(self, output: 'StaticOutputNode.Output', created_by: 'BaseNode', *args, **kwargs):
+    def __init__(self, output: 'StaticOutputNode.Output', *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._output = output
         self.set_status(ElementStatus.STATIC)
-        self.set_created_by(created_by)
     @property
     def output(self) -> Output:
         if not self.created_by.output.contains(self):
