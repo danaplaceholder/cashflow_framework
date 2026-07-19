@@ -53,45 +53,51 @@ class ComputationOnlyNode(BaseNode):
     def get_external_data_last_modified(self) -> int | None:
         return None
 
-TRADES_IN_DB_1 = {"last_modified": 1, "trades": [ 
+TRADES_IN_DB_1 = {"data": [ 
             Trade(symbol="AAPL", trade_id="1", direction="Buy", volume=100, price=150.75),
             Trade(symbol="TSLA", trade_id="11", direction="Buy", volume=100, price=161.75),
-        ]}
-TRADES_IN_DB_2 = {"last_modified": 2, "trades": [
+        ], "last_modified": 1}
+TRADES_IN_DB_2 = {"data": [
     Trade(symbol="AAPL", trade_id="1", direction="Buy", volume=100, price=150.75),
-]}
+], "last_modified": 2}
 
-ALL_SYMBOL_ONTOLOGY_1 = {"symbol_ontology": [
+ALL_SYMBOL_ONTOLOGY_1 = {"data": [
             SymbolOntology(symbol="AAPL", symbol_type="stock_1", symbol_category="CAT_TECH"),
             SymbolOntology(symbol="TSLA", symbol_type="stock_2", symbol_category="CAT_AUTOMOTIVE"),
             SymbolOntology(symbol="SOME_OTHER_SYMBOL", symbol_type="option_1", symbol_category="CAT_TECH"),
         ], "last_modified": 1}
 
-ALL_SYMBOL_ONTOLOGY_2 = {"symbol_ontology": [
+ALL_SYMBOL_ONTOLOGY_2 = {"data": [
             SymbolOntology(symbol="AAPL", symbol_type="stock_1", symbol_category="CAT_TECH"),
             SymbolOntology(symbol="TSLA", symbol_type="stock_3", symbol_category="XCAT_AUTOMOTIVE"),
             SymbolOntology(symbol="SOME_OTHER_SYMBOL", symbol_type="option_2", symbol_category="CAT_TECH"),
         ], "last_modified": 2}
 
-ALL_SYMBOL_ONTOLOGY_3 = {"symbol_ontology": [
+ALL_SYMBOL_ONTOLOGY_3 = {"data": [
             SymbolOntology(symbol="AAPL", symbol_type="stock_1", symbol_category="CAT_TECH"),
             SymbolOntology(symbol="TSLA", symbol_type="stock_4", symbol_category="XCAT_AUTOMOTIVE"),
             SymbolOntology(symbol="SOME_OTHER_SYMBOL", symbol_type="option_2", symbol_category="CAT_TECH"),
         ], "last_modified": 3}
-
+POSITIONS_IN_DB_1 = {"data": [
+            Position(symbol="AAPL", position=100),
+            Position(symbol="TSLA", position=50),
+        ], "last_modified": 1}
         
+MOCK_DB = {
+    "trades": TRADES_IN_DB_1,
+    "symbol_ontology": ALL_SYMBOL_ONTOLOGY_1,
+    "positions": POSITIONS_IN_DB_1,
+}
 class GetAllTradesNode(DataAccessNode):
-    _external_data_last_modified: int | None = None
     class Output(Output):
         all_trades: list[Trade]
 
     def _compute_output(self) -> Output:
-        output = self.Output(all_trades=TRADES_IN_DB_1["trades"])
-        self._external_data_last_modified = TRADES_IN_DB_1["last_modified"]
+        output = self.Output(all_trades=MOCK_DB["trades"]["data"])
         return output
 
     def get_external_data_last_modified(self) -> int:
-        return TRADES_IN_DB_1["last_modified"]
+        return MOCK_DB["trades"]["last_modified"]
 
 
 class GetAllYesterdayPositionsNode(DataAccessNode):
@@ -102,18 +108,14 @@ class GetAllYesterdayPositionsNode(DataAccessNode):
         return None # should be made real
 
     def _compute_output(self) -> Output:
-        return self.Output(all_yesterday_positions=[
-            Position(symbol="AAPL", position=100),
-            Position(symbol="TSLA", position=50),
-        ])
+        return self.Output(all_yesterday_positions=MOCK_DB["positions"]["data"])
 class GetAllSymbolOntologyNode(DataAccessNode):
-    _external_data_last_modified: int | None = None
     class Output(Output):
         all_symbol_ontology: list[SymbolOntology]
     def _compute_output(self) -> Output:
-        return self.Output(all_symbol_ontology=ALL_SYMBOL_ONTOLOGY_1["symbol_ontology"])
+        return self.Output(all_symbol_ontology=MOCK_DB["symbol_ontology"]["data"])
     def get_external_data_last_modified(self) -> int:
-        return ALL_SYMBOL_ONTOLOGY_1["last_modified"]
+        return MOCK_DB["symbol_ontology"]["last_modified"]
 
 
 class GetSymbolTodayTradesNode(ComputationOnlyNode):
@@ -224,14 +226,14 @@ if __name__ == "__main__":
 #
     print("HEYYYYY")
     # change TSLA
-    ALL_SYMBOL_ONTOLOGY_1 = ALL_SYMBOL_ONTOLOGY_2
+    MOCK_DB["symbol_ontology"] = ALL_SYMBOL_ONTOLOGY_2
     firm_economics_output_2 = trade_analysis_node.output.firm_economics_node.output.firm_economics
     time.sleep(1)
     # RM TSLA
-    TRADES_IN_DB_1 = TRADES_IN_DB_2
+    MOCK_DB["trades"] = TRADES_IN_DB_2
     firm_economics_output_2 = trade_analysis_node.output.firm_economics_node.output.firm_economics
     time.sleep(1)
     # CHANGE TSLA again
-    ALL_SYMBOL_ONTOLOGY_1 = ALL_SYMBOL_ONTOLOGY_3
+    MOCK_DB["symbol_ontology"] = ALL_SYMBOL_ONTOLOGY_3
     firm_economics_output_3 = trade_analysis_node.output.firm_economics_node.output.firm_economics  
 
