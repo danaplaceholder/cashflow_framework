@@ -304,16 +304,18 @@ class BaseNode(BaseGraphElement):
 
 
 
-    def full_upstream_fingerprint(self) -> NodeFingerprint:
+    def full_upstream_fingerprint(self ) -> NodeFingerprint:
         """
         A node should recompute if its created_by, input, or external data has changed since last computation
         """
-      # then do input
+        #refresh created by 
+        if self.created_by is not None and not self.created_by.output.contains(self):
+            raise ValueError(f"Node {self.created_by.identity_key()} of class {self.created_by.__class__.__name__} should not exist. This can happen if you specifically ask for a node that has been deleted but should not happen asynchronously.")
+        # then do input
         input_fingerprint = self.input.recursive_output_fingerprint() if self.input is not None else None
         # then do external data last modified, since input can affect external data access 
         external_data_last_modified = self.get_external_data_last_modified() if self.get_external_data_last_modified() is not None else None
         return FullUpstreamFingerprint(
-            created_by_fingerprint=None,
             input_fingerprint=input_fingerprint,
             external_data_last_modified=external_data_last_modified,
         )
@@ -321,8 +323,6 @@ class BaseNode(BaseGraphElement):
     @property                       
     def output(self) -> Output:     
             # refresh created by 
-            if self.created_by is not None and not self.created_by.output.contains(self):
-                raise ValueError(f"Node {self.identity_key()} of class {self.__class__.__name__} should not exist. This can happen if you specifically ask for a node that has been deleted but should not happen asynchronously.")
             latest_full_upstream_fingerprint = self.full_upstream_fingerprint()
             if self._output is None or self._outer_should_recompute_output(latest_full_upstream_fingerprint=latest_full_upstream_fingerprint):
                 self._outer_compute_output(pre_compute_full_upstream_fingerprint=latest_full_upstream_fingerprint)

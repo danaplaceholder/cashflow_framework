@@ -177,16 +177,12 @@ class NodeFingerprint(GraphElementFingerprint):
 class FullUpstreamFingerprint(BaseModel):
         input_fingerprint: InputFingerprint | None = None
         external_data_last_modified: int | None = None
-        created_by_fingerprint: NodeFingerprint | None = None
     
         def has_been_modified(self, other: 'FullUpstreamFingerprint') -> bool:
             if self.input_fingerprint is not None:
                 if self.input_fingerprint._inner_compare(other.input_fingerprint, ignore_external_data_last_modified=False):
                     return True
             if self.external_data_last_modified != other.external_data_last_modified:
-                    return True
-            if self.created_by_fingerprint is not None:
-                if self.created_by_fingerprint._inner_compare(other.created_by_fingerprint, ignore_external_data_last_modified=False):
                     return True
             return False
       
@@ -196,8 +192,6 @@ class FullUpstreamFingerprint(BaseModel):
                 diffs.append(self.input_fingerprint._inner_compare(other.input_fingerprint, ignore_external_data_last_modified=True))
             if self.external_data_last_modified != other.external_data_last_modified:
                 diffs.append((self.external_data_last_modified, other.external_data_last_modified))
-            if self.created_by_fingerprint is not None:
-                diffs.append(self.created_by_fingerprint._inner_compare(other.created_by_fingerprint, ignore_external_data_last_modified=True))
             return diffs
 
         def underlying_data_match(self, other: 'FullUpstreamFingerprint') -> bool:
@@ -212,7 +206,4 @@ class FullUpstreamFingerprint(BaseModel):
                 If the node itself uses external data that has since been modified, then the underlying data could possibly not match
                 """
                 return False
-            if self.created_by_fingerprint is not None:
-                if not self.created_by_fingerprint.underlying_data_match(other.created_by_fingerprint):
-                    return False
             return True
