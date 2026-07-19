@@ -11,6 +11,16 @@ class GraphStateError(Exception):
     pass
 
 class Collection(BaseModel, ABC):
+
+    def recursive_output_fingerprint(self) -> 'CollectionFingerprint':
+        running_dict = {}
+        for field_name, _ in self.__class__.model_fields.items():
+            value = getattr(self, field_name)
+            if isinstance(value, list) :
+                running_dict[field_name] = [item.recursive_output_fingerprint() for item in value]
+            else:
+                running_dict[field_name] = value.recursive_output_fingerprint()
+        return self.__class__.make_fingerprint(running_dict)
         
     def element_identity_fingerprint(self ) -> 'CollectionFingerprint':
         running_dict = {}
@@ -153,6 +163,7 @@ class ElementStatus(StrEnum):
     WAITING_FOR_INPUT = "waiting_for_input"
     COMPLETED = "completed"
     DELETED = "deleted"
+    STATIC = "static"
 
 class GraphElementConfig(BaseModel):
         created_by: 'BaseNode' = None
@@ -162,6 +173,7 @@ class GraphElementConfig(BaseModel):
 
 class BaseGraphElement(BaseModel, ABC):
     _created_by: 'BaseNode' = PrivateAttr(default=None)
+    alias: str = ""
     @abstractmethod
     def identity_key(self) -> str:
         raise NotImplementedError("Subclasses must implement this method")
@@ -170,6 +182,9 @@ class BaseGraphElement(BaseModel, ABC):
         raise NotImplementedError("Subclasses must implement this method")
     @abstractmethod
     def recursive_fingerprint(self) -> DataFingerprint:
+        raise NotImplementedError("Subclasses must implement this method")
+    
+    def recursive_output_fingerprint(self) -> DataFingerprint:
         raise NotImplementedError("Subclasses must implement this method")
         
     def set_created_by(self, created_by: 'BaseNode') -> None:
@@ -182,6 +197,11 @@ class BaseDataElement(BaseGraphElement):
 
     input: None = None
     output: None = None
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, BaseDataElement):
+            return False
+        return self.data_hash() == other.data_hash()
     
     def identity_key(self) -> str:
         return "DATA_" + str(self)
@@ -195,6 +215,8 @@ class BaseDataElement(BaseGraphElement):
             data_hash=self.data_hash(),
         )
     def recursive_fingerprint(self) -> DataFingerprint:
+        return self.element_identity_fingerprint() # same as identity fingerprint for data elements
+    def recursive_output_fingerprint(self) -> DataFingerprint:
         return self.element_identity_fingerprint() # same as identity fingerprint for data elements
 class BaseNode(BaseGraphElement):
     # TODO Caching layer ? 
@@ -227,6 +249,15 @@ class BaseNode(BaseGraphElement):
             output_fingerprint=item_output.recursive_fingerprint() if item_output is not None else None,
             external_data_last_modified=self.get_external_data_last_modified()
         )
+    def recursive_output_fingerprint(self) -> DataFingerprint:
+        item_output = self.output
+        return NodeFingerprint(
+            identity_key=self.identity_key(), 
+            input_fingerprint=None,
+            created_by_fingerprint=None,
+            output_fingerprint=item_output.recursive_fingerprint() if item_output is not None else None,
+            external_data_last_modified=None,
+        )
 
     def get_external_data_last_modified(self) -> int | None:
         raise NotImplementedError("Subclasses must implement this method")
@@ -250,11 +281,9 @@ class BaseNode(BaseGraphElement):
             from draw import build_graph
             build_graph(self.root_node)
 
-    def config_hash(self) -> str:
-        return str(self.config) if self.config else ""
 
     def element_name(self) -> str:
-        return self.__class__.__name__ + "_" +  self.config_hash() + "_STATUS_" + self._status.value
+        return self.__class__.__name__ + "_" +  self.alias + "_STATUS_" + self._status.value
     
 
     def created_by_fingerprint(self) -> NodeFingerprint:
@@ -264,7 +293,7 @@ class BaseNode(BaseGraphElement):
         created_by_input = self.created_by.input
         created_by_output = self.created_by.output
         if not created_by_output.contains(self):
-            raise ValueError(f"Node {self.config_hash()} of class {self.__class__.__name__} should not exist. This can happen if you specifically ask for a node that has been deleted but should not happen asynchronously.")
+            raise ValueError(f"Node {self.alias} of class {self.__class__.__name__} should not exist. This can happen if you specifically ask for a node that has been deleted but should not happen asynchronously.")
         return NodeFingerprint(
             identity_key=self.created_by.identity_key(),
             input_fingerprint=created_by_input.recursive_fingerprint() if created_by_input is not None else None,
@@ -279,21 +308,21 @@ class BaseNode(BaseGraphElement):
         """
         A node should recompute if its created_by, input, or external data has changed since last computation
         """
-        # must do created by first since it can affect input dependencies
-        created_by_fingerprint = self.created_by_fingerprint() if self.created_by is not None else None
-        # then do input
-        input_fingerprint = self.input.recursive_fingerprint() if self.input is not None else None
+      # then do input
+        input_fingerprint = self.input.recursive_output_fingerprint() if self.input is not None else None
         # then do external data last modified, since input can affect external data access 
         external_data_last_modified = self.get_external_data_last_modified() if self.get_external_data_last_modified() is not None else None
         return FullUpstreamFingerprint(
-            created_by_fingerprint=created_by_fingerprint,
+            created_by_fingerprint=None,
             input_fingerprint=input_fingerprint,
             external_data_last_modified=external_data_last_modified,
         )
 
     @property                       
     def output(self) -> Output:     
- 
+            # refresh created by 
+            if self.created_by is not None and not self.created_by.output.contains(self):
+                raise ValueError(f"Node {self.identity_key()} of class {self.__class__.__name__} should not exist. This can happen if you specifically ask for a node that has been deleted but should not happen asynchronously.")
             latest_full_upstream_fingerprint = self.full_upstream_fingerprint()
             if self._output is None or self._outer_should_recompute_output(latest_full_upstream_fingerprint=latest_full_upstream_fingerprint):
                 self._outer_compute_output(pre_compute_full_upstream_fingerprint=latest_full_upstream_fingerprint)
@@ -301,7 +330,7 @@ class BaseNode(BaseGraphElement):
             return self._output
 
     def identity_key(self) -> str:
-        return f"___{self.created_by_identity_key()}->{self.__class__.__name__}::{self.config_hash()}|"
+        return f"___{self.created_by_identity_key()}->{self.__class__.__name__}::{self.alias}|"
 
     def created_by_identity_key(self) -> str:
         return f"{self.created_by.identity_key()}" if self.created_by else ""
@@ -386,3 +415,20 @@ class BaseNode(BaseGraphElement):
         
 
     
+class StaticOutputNode(BaseNode):
+    def __init__(self, output: 'StaticOutputNode.Output', created_by: 'BaseNode', *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._output = output
+        self.set_status(ElementStatus.STATIC)
+        self.set_created_by(created_by)
+    @property
+    def output(self) -> Output:
+        if not self.created_by.output.contains(self):
+            raise ValueError(f"Node {self.identity_key()} of class {self.__class__.__name__} should not exist. This can happen if you specifically ask for a node that has been deleted but should not happen asynchronously.")
+        return self._output
+    def _compute_output(self) -> Output:
+        raise ValueError("StaticOutputNode should not be computed")
+    def set_input(self, new_input: 'BaseNode.Input') -> None:
+        return
+    def get_external_data_last_modified(self) -> int | None:
+        None
