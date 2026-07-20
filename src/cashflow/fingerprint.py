@@ -1,7 +1,7 @@
 """
-fingerprint for graph elements
-by Dana K
-NOT by ai
+Fingerprint for graph elements
+    Written entirely by danaplaceholder
+    NOT by ai
 """
 from pydantic import PrivateAttr
 from pydantic import BaseModel

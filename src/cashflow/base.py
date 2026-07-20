@@ -1,3 +1,8 @@
+"""
+Monadic computational graph framework
+    Written entirely by danaplaceholder
+    NOT by ai
+"""
 from pydantic import BaseModel
 from pydantic import PrivateAttr
 from pydantic import Field
@@ -157,15 +162,15 @@ class Output(Collection):
 
 
 class ElementStatus(StrEnum):
-    CREATED = "created"
-    CHECKING_IF_SHOULD_EXIST = "checking_if_should_exist"
-    CHECKING_IF_SHOULD_RECOMPUTE_OUTPUT = "checking_if_should_recompute_output"
-    COMPUTING_OUTPUT = "computing_output"
-    UPDATING_OUTPUT = "updating_output"
-    WAITING_FOR_INPUT = "waiting_for_input"
-    COMPLETED = "completed"
-    DELETED = "deleted"
-    STATIC = "static"
+    CREATED = "CREATED"
+    CHECKING_IF_SHOULD_EXIST = "CHECKING_IF_SHOULD_EXIST"
+    CHECKING_IF_SHOULD_RECOMPUTE_OUTPUT = "CHECKING_IF_SHOULD_RECOMPUTE_OUTPUT"
+    COMPUTING_OUTPUT = "RUNNING"
+    UPDATING_OUTPUT = "UPDATING"
+    WAITING_FOR_INPUT = "WAITING"
+    COMPLETED = "DONE"
+    DELETED = "DELETED"
+    STATIC = "STATIC"
 
 class BaseGraphElement(BaseModel, ABC):
     """
@@ -269,7 +274,7 @@ class BaseNode(BaseGraphElement):
 
 
     def element_name(self) -> str:
-        return self.__class__.__name__ + "_" +  self.alias + "_STATUS_" + self._status.value
+        return self.__class__.__name__ + "_" +  self.alias + "__" + self._status.value
     
     @property                       
     def output(self) -> Output:

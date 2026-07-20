@@ -1,6 +1,6 @@
 """
-graph visualizer/drawing
-Written by ai, with guidance from Dana K
+Computational graph visualizer/drawing
+    Written by ai with guidance from danaplaceholder
 """
 from base import BaseNode, ElementStatus
 import atexit
@@ -11,15 +11,6 @@ import tempfile
 import time
 from pathlib import Path
 
-# -------------------------------------Visualization-------------------------------------
-#class FirmEconomicsNode(BaseNode):
-#    class Input(BaseNode.Input):
-#        trade_analysis_node: TradeAnalysisNode
-#        firm_info_node: FirmInfoNode
-#    class Output(BaseNode.Output):
-#        firm_economics: FirmEconomics
-#    def _compute_output(self) -> Output:
-#        return self.Output(firm_economics=FirmEconomics(trade_analysis=self.input.trade_analysis_node.output.trade_analysis, firm_info=self.input.firm_info_node.output.firm_info))
 color_key_legend = {}
 color_key_legend[ElementStatus.CREATED] = "#888780"
 color_key_legend[ElementStatus.CHECKING_IF_SHOULD_EXIST] = "#d3d2cb"
@@ -82,7 +73,7 @@ def export_video() -> None:
 
 
 def _parse_status(name: str) -> ElementStatus:
-    return ElementStatus(name.rsplit("_STATUS_", 1)[-1])
+    return ElementStatus(name.rsplit("__", 1)[-1])
 
 def get_color_for_status(status: ElementStatus | str) -> str:
     if not isinstance(status, ElementStatus):
@@ -96,21 +87,21 @@ def _node_attrs(name: str) -> dict:
         fontname="Helvetica",
         fontsize="11",
         margin="0.18,0.10",
-        fillcolor=get_color_for_status(_parse_status(name)),
-        color=color_black,
-        penwidth="2",
+        fillcolor="#ffffff",
+        color=get_color_for_status(_parse_status(name)),
+        penwidth="4",
     )
 
 def _default_node_attrs() -> dict:
-    attrs = _node_attrs(f"x_STATUS_{ElementStatus.CREATED.value}")
+    attrs = _node_attrs(f"x__{ElementStatus.CREATED.value}")
     return attrs
 
 def _cluster_attrs(name: str) -> dict:
     return dict(
         style="rounded,filled,bold",
         fillcolor=color_cluster_fill,
-        color=color_black,
-        penwidth="2",
+        color=get_color_for_status(_parse_status(name)),
+        penwidth="4",
         fontname="Helvetica",
         fontsize="12",
         labeljust="l",
