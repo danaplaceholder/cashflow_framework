@@ -1,13 +1,13 @@
 """
-trading data pipeline with dashed dependencies
-by Dana K
-NOT by ai
+Example trading data pipeline with dynamic Node construction depending on trade data
+       by danaplaceholder
+       NOT by ai
 """
 from base import BaseDataElement, BaseNode, Input, Output, StaticOutputNode
 from pydantic import BaseModel
 import time
 from abc import abstractmethod
-#------------------------------------------Example------------------------------------------
+
 class Trade(BaseDataElement):
     symbol: str
     trade_id: str

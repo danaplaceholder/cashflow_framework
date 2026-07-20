@@ -1,4 +1,6 @@
-# cashflow
+# Monadic Computational Graph Framework
+Ideation and backend code 100% painstakingly and iteratively done by me, danaplaceholder. 
+Visualization+drawing mostly done by ai, with guidance from danaplaceholder. 
 
 Computational graph framework for state-dependent incremental computation. 
 - Monadic: ***Just create Nodes***. Can be nested.
