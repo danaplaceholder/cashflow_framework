@@ -24,3 +24,4 @@ python src/cashflow/exampmle1.py
 Saved animation to /app/output_1784569497.mp4
 ```
 
+<img width="1415" height="733" alt="image" src="https://github.com/user-attachments/assets/5ce0d47d-02d7-4975-b3fc-e9367fdad6e2" />
