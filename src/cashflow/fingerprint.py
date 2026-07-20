@@ -124,28 +124,24 @@ class NodeFingerprint(GraphElementFingerprint):
     input_fingerprint: InputFingerprint | None = None
     output_fingerprint: OutputFingerprint | None = None
     external_data_last_modified: int | None = None
-    created_by_fingerprint: 'NodeFingerprint | None' = None
 
     def _inner_update(self, new_fingerprint: 'NodeFingerprint') -> None:
         self.input_fingerprint.update(new_fingerprint.input_fingerprint)
         self.output_fingerprint.update(new_fingerprint.output_fingerprint)
-        self.created_by_fingerprint.update(new_fingerprint.created_by_fingerprint)
         if self.external_data_last_modified != new_fingerprint.external_data_last_modified:
             self.external_data_last_modified = new_fingerprint.external_data_last_modified
     
     def _inner_compare(self, new_fingerprint: 'NodeFingerprint', ignore_external_data_last_modified: bool) -> dict[str, list[str]] | None:
         input_diffs = self.input_fingerprint._inner_compare(new_fingerprint.input_fingerprint, ignore_external_data_last_modified=ignore_external_data_last_modified) if self.input_fingerprint is not None else None
         output_diffs = self.output_fingerprint._inner_compare(new_fingerprint.output_fingerprint, ignore_external_data_last_modified=ignore_external_data_last_modified) if self.output_fingerprint is not None else None
-        created_by_diffs = self.created_by_fingerprint._inner_compare(new_fingerprint.created_by_fingerprint, ignore_external_data_last_modified=ignore_external_data_last_modified) if self.created_by_fingerprint is not None else None
         if not ignore_external_data_last_modified:
             external_data_last_modified_diffs = (self.external_data_last_modified, new_fingerprint.external_data_last_modified) if self.external_data_last_modified != new_fingerprint.external_data_last_modified else None
         else:
             external_data_last_modified_diffs = None
-        if input_diffs or created_by_diffs or external_data_last_modified_diffs:
+        if input_diffs or external_data_last_modified_diffs:
             return {
                 "identity_key": self.identity_key,
                 "input_diffs": input_diffs,
-                "created_by_diffs": created_by_diffs,
                 "external_data_last_modified_diffs": external_data_last_modified_diffs
             }
         elif output_diffs:

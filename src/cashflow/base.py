@@ -24,19 +24,6 @@ class Collection(BaseModel, ABC):
                 field_fingerprint_dict[field_name] = value.recursive_output_fingerprint()
         return self.__class__.make_fingerprint(field_fingerprint_dict=field_fingerprint_dict)
         
-    def element_identity_fingerprint(self ) -> InputFingerprint | OutputFingerprint:
-        """
-        Single layer fingerprint, just the fingerprint of one layer of output without recursing
-        """
-        field_fingerprint_dict = {}
-        for field_name, _ in self.__class__.model_fields.items():
-            value = getattr(self, field_name)
-            if isinstance(value, list) :
-                field_fingerprint_dict[field_name] = [item.element_identity_fingerprint() for item in value]
-            else:
-                field_fingerprint_dict[field_name] = value.element_identity_fingerprint()
-        return self.__class__.make_fingerprint(field_fingerprint_dict=field_fingerprint_dict)
-
     @classmethod
     @abstractmethod
     def make_fingerprint(cls, field_fingerprint_dict: dict[str, DataFingerprint | NodeFingerprint | list[DataFingerprint | NodeFingerprint] | None]) -> InputFingerprint | OutputFingerprint:
@@ -90,8 +77,8 @@ class Output(Collection):
         def make_fingerprint(cls, field_fingerprint_dict: dict[str, DataFingerprint | NodeFingerprint | list[DataFingerprint | NodeFingerprint] | None]) -> OutputFingerprint:
             return OutputFingerprint(identity_key="some_output", field_fingerprint_dict=field_fingerprint_dict)
        
-        def set_upstream_data_fingerprint(self, upstream_data_fingerprint: NodeFingerprint) -> None:
-            self._upstream_data_fingerprint = upstream_data_fingerprint
+        def set_upstream_data_fingerprint(self, new_upstream_data_fingerprint: NodeFingerprint) -> None:
+            self._upstream_data_fingerprint = new_upstream_data_fingerprint # TODO: use update? 
 
         def set_created_by(self, created_by: 'BaseNode') -> None:
             """
@@ -121,7 +108,7 @@ class Output(Collection):
                         return True      
             return False
 
-        def update(self, new_output: 'BaseNode.Output', upstream_data_fingerprint: NodeFingerprint) -> None:
+        def update(self, new_output: 'BaseNode.Output', new_upstream_data_fingerprint: NodeFingerprint) -> None:
             """
             (1) (UPDATE) make sure all Nodes in Output are pointing to the latest correct Nodes in their Input
             (2) DELETE Nodes that are no longer in Output. 
@@ -159,7 +146,7 @@ class Output(Collection):
                             setattr(self, field_name, new_value)
                     else:
                         setattr(self, field_name, new_value)
-            self.set_upstream_data_fingerprint( upstream_data_fingerprint)
+            self.set_upstream_data_fingerprint( new_upstream_data_fingerprint=new_upstream_data_fingerprint)
 
 
 
@@ -184,10 +171,7 @@ class BaseGraphElement(BaseModel, ABC):
     def identity_key(self) -> str:
         raise NotImplementedError("Subclasses must implement this method")
     
-    @abstractmethod
-    def element_identity_fingerprint(self) -> DataFingerprint:
-        raise NotImplementedError("Subclasses must implement this method")
-    
+
     @abstractmethod
     def recursive_output_fingerprint(self) -> DataFingerprint:
         raise NotImplementedError("Subclasses must implement this method")
@@ -216,14 +200,11 @@ class BaseDataElement(BaseGraphElement):
     def data_hash(self) -> str:
         return self.identity_key() 
     
-    def element_identity_fingerprint(self) -> DataFingerprint:
+    def recursive_output_fingerprint(self) -> DataFingerprint:
         return DataFingerprint(
             identity_key=self.identity_key(), 
             data_hash=self.data_hash(),
         )
-    def recursive_output_fingerprint(self) -> DataFingerprint:
-        return self.element_identity_fingerprint() # same as identity fingerprint for data elements
-
 class BaseNode(BaseGraphElement):
     # TODO Caching layer ? 
     input: Input = Field(default=None)
@@ -236,36 +217,12 @@ class BaseNode(BaseGraphElement):
     def fingerprint(self) -> NodeFingerprint:
         return self._fingerprint
 
-    def element_identity_fingerprint(self) -> NodeFingerprint:
-        return NodeFingerprint(
-            identity_key=self.identity_key(), 
-            input_fingerprint=self.input.element_identity_fingerprint() if self.input is not None else None, 
-            created_by_fingerprint=None,
-            output_fingerprint=None,
-            external_data_last_modified=None,
-        )
-
     def recursive_output_fingerprint(self) -> DataFingerprint:
         item_output = self.output
         return NodeFingerprint(
             identity_key=self.identity_key(), 
             input_fingerprint=None,
-            created_by_fingerprint=None,
             output_fingerprint=item_output.recursive_output_fingerprint() if item_output is not None else None,
-            external_data_last_modified=None,
-        )
-    def created_by_fingerprint(self) -> NodeFingerprint:
-        if self.created_by is None:
-            return None
-
-        created_by_output = self.created_by.output
-        if not created_by_output.contains(self):
-            raise ValueError(f"Node {self.alias} of class {self.__class__.__name__} should not exist. This can happen if you specifically ask for a node that has been deleted but should not happen asynchronously.")
-        return NodeFingerprint(
-            identity_key=self.created_by.identity_key(),
-            input_fingerprint=None,
-            created_by_fingerprint=None,
-            output_fingerprint= created_by_output.element_identity_fingerprint() if created_by_output is not None else None, # only single layer since just interested in what created_by creates, not what its internal nodes create 
             external_data_last_modified=None,
         )
 
@@ -279,13 +236,12 @@ class BaseNode(BaseGraphElement):
 
         return NodeFingerprint(
             identity_key=self.identity_key(),
-            created_by_fingerprint=None,
             input_fingerprint=self.input.recursive_output_fingerprint() if self.input is not None else None,
             external_data_last_modified=self.get_external_data_last_modified(),
             output_fingerprint=None,
         )
 
-
+    @abstractmethod
     def get_external_data_last_modified(self) -> int | None:
         raise NotImplementedError("Subclasses must implement this method")
 
@@ -295,9 +251,6 @@ class BaseNode(BaseGraphElement):
             return self
         else:
             return self.created_by.root_node
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.set_status(ElementStatus.CREATED)
     
     def set_status(self, status: ElementStatus) -> None:
         if self._status == status:
@@ -312,9 +265,6 @@ class BaseNode(BaseGraphElement):
     def element_name(self) -> str:
         return self.__class__.__name__ + "_" +  self.alias + "_STATUS_" + self._status.value
     
-
-
-
     @property                       
     def output(self) -> Output:     
             # refresh created by 
@@ -371,7 +321,7 @@ class BaseNode(BaseGraphElement):
                 self._output = computed_output
                 self._output.set_upstream_data_fingerprint(pre_compute_upstream_data_fingerprint)
             else:
-                self._output.update(computed_output, upstream_data_fingerprint=pre_compute_upstream_data_fingerprint)
+                self._output.update(computed_output, new_upstream_data_fingerprint=pre_compute_upstream_data_fingerprint)
 
             # mark as completed
             self.set_status(ElementStatus.COMPLETED)
