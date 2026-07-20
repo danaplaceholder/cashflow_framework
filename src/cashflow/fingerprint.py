@@ -5,7 +5,6 @@ NOT by ai
 """
 from pydantic import PrivateAttr
 from pydantic import BaseModel
-from datetime import datetime
  
 
 class GraphElementFingerprint(BaseModel):
@@ -29,6 +28,10 @@ class GraphElementFingerprint(BaseModel):
 
 class CollectionFingerprint(GraphElementFingerprint):
     def _inner_update(self, new_fingerprint: 'OutputFingerprint') -> None:
+        """
+        Recurse through nested field_fingerprint_dict for Input/Output instances of a Node
+        Supports version-tracting/incrementing of Fingerprint objects inside the field_fingerprint_dict, instead of just replacing them. 
+        """
         for field_name in self.field_fingerprint_dict.keys():
             old_value = self.field_fingerprint_dict.get(field_name)
             new_value = new_fingerprint.field_fingerprint_dict.get(field_name)
@@ -57,6 +60,9 @@ class CollectionFingerprint(GraphElementFingerprint):
             elif old_value != new_value:
                 self.field_fingerprint_dict[field_name].update(new_value)
     def _inner_compare(self,  new_fingerprint: 'GraphElementFingerprint', ignore_external_data_last_modified: bool) -> list:
+        """
+        Could be replaced with a "dry-run" version of _inner_update..... 
+        """
         diffs = {}
         for field_name in self.field_fingerprint_dict.keys():
             field_diffs = []
@@ -126,6 +132,7 @@ class NodeFingerprint(GraphElementFingerprint):
         self.created_by_fingerprint.update(new_fingerprint.created_by_fingerprint)
         if self.external_data_last_modified != new_fingerprint.external_data_last_modified:
             self.external_data_last_modified = new_fingerprint.external_data_last_modified
+    
     def _inner_compare(self, new_fingerprint: 'NodeFingerprint', ignore_external_data_last_modified: bool) -> dict[str, list[str]] | None:
         input_diffs = self.input_fingerprint._inner_compare(new_fingerprint.input_fingerprint, ignore_external_data_last_modified=ignore_external_data_last_modified) if self.input_fingerprint is not None else None
         output_diffs = self.output_fingerprint._inner_compare(new_fingerprint.output_fingerprint, ignore_external_data_last_modified=ignore_external_data_last_modified) if self.output_fingerprint is not None else None
@@ -147,7 +154,11 @@ class NodeFingerprint(GraphElementFingerprint):
                 "output_diffs": output_diffs,
             }
         return None
+
     def upstream_data_modified(self, other: 'NodeFingerprint') -> bool:
+        """
+        Check if any external_data_last_modified has changed anywhere in the upstream input chain
+        """
         if self.input_fingerprint is not None:
             if self.input_fingerprint._inner_compare(other.input_fingerprint, ignore_external_data_last_modified=False):
                 return True
@@ -156,6 +167,16 @@ class NodeFingerprint(GraphElementFingerprint):
         return False
     
     def underlying_upstream_data_diffs(self, other: 'NodeFingerprint') -> dict[str, list[str]] | None:
+        """
+        Get diffs between the current _output's 
+            (1) input fingerprint, IGNORING temporary data changes/oscillations, i.e. is the output valid for the CURRENT UNDERLYING input data
+            (2) external data last_modified
+        
+        Diffs will be present and should recompute output if 
+           (1) input data no longer matches underlying data portion of _output fingerprint 
+             OR
+           (2) external data has been modified since _output was last set 
+        """
         diffs = []
         if self.input_fingerprint is not None:
             input_diffs = self.input_fingerprint._inner_compare(other.input_fingerprint, ignore_external_data_last_modified=True)
