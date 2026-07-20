@@ -6,29 +6,14 @@ NOT by ai
 from pydantic import PrivateAttr
 from pydantic import BaseModel
 from datetime import datetime
-
-class Version(BaseModel):
-    _version_number: int = PrivateAttr(default=0)
-    _timestamp: datetime = PrivateAttr(default=datetime.now())
-
-    @property
-    def version_number(self) -> int:
-        return self._version_number + 1
-
-    @property
-    def timestamp(self) -> datetime:
-        return self._timestamp
-
-    def bump_version(self) -> None:
-        self._version_number += 1
-        self._timestamp = datetime.now()
+ 
 
 class GraphElementFingerprint(BaseModel):
     identity_key: str
-    _version: Version = PrivateAttr(default=Version())
+    _version: int = PrivateAttr(default=0)
 
     def _bump_version(self) -> None:
-        self._version.bump_version()
+        self._version += 1
 
     @property
     def version(self) -> int:
@@ -40,13 +25,6 @@ class GraphElementFingerprint(BaseModel):
 
     def _inner_update(self, new_fingerprint: 'GraphElementFingerprint') -> None:
         raise NotImplementedError("Subclasses must implement this method")
-
-    def underlying_data_match( self, other: 'GraphElementFingerprint') -> bool:
-        """
-        Returns True if the underlying data of the two fingerprints match, potential temporary data changes
-        """
-        return self.identity_key == other.identity_key and not self._inner_compare(other, ignore_external_data_last_modified=True) 
-        
 
 
 class CollectionFingerprint(GraphElementFingerprint):
@@ -143,12 +121,9 @@ class NodeFingerprint(GraphElementFingerprint):
     created_by_fingerprint: 'NodeFingerprint | None' = None
 
     def _inner_update(self, new_fingerprint: 'NodeFingerprint') -> None:
-        if not self.input_fingerprint.underlying_data_match(new_fingerprint.input_fingerprint):
-            self.input_fingerprint.update(new_fingerprint.input_fingerprint)
-        if not self.output_fingerprint.underlying_data_match(new_fingerprint.output_fingerprint):
-            self.output_fingerprint.update(new_fingerprint.output_fingerprint)
-        if not self.created_by_fingerprint.underlying_data_match(new_fingerprint.created_by_fingerprint):
-            self.created_by_fingerprint.update(new_fingerprint.created_by_fingerprint)
+        self.input_fingerprint.update(new_fingerprint.input_fingerprint)
+        self.output_fingerprint.update(new_fingerprint.output_fingerprint)
+        self.created_by_fingerprint.update(new_fingerprint.created_by_fingerprint)
         if self.external_data_last_modified != new_fingerprint.external_data_last_modified:
             self.external_data_last_modified = new_fingerprint.external_data_last_modified
     def _inner_compare(self, new_fingerprint: 'NodeFingerprint', ignore_external_data_last_modified: bool) -> dict[str, list[str]] | None:
@@ -172,38 +147,21 @@ class NodeFingerprint(GraphElementFingerprint):
                 "output_diffs": output_diffs,
             }
         return None
-
-
-class FullUpstreamFingerprint(BaseModel):
-        input_fingerprint: InputFingerprint | None = None
-        external_data_last_modified: int | None = None
+    def upstream_data_modified(self, other: 'NodeFingerprint') -> bool:
+        if self.input_fingerprint is not None:
+            if self.input_fingerprint._inner_compare(other.input_fingerprint, ignore_external_data_last_modified=False):
+                return True
+        if self.external_data_last_modified != other.external_data_last_modified:
+                return True
+        return False
     
-        def has_been_modified(self, other: 'FullUpstreamFingerprint') -> bool:
-            if self.input_fingerprint is not None:
-                if self.input_fingerprint._inner_compare(other.input_fingerprint, ignore_external_data_last_modified=False):
-                    return True
-            if self.external_data_last_modified != other.external_data_last_modified:
-                    return True
-            return False
-      
-        def get_diffs(self, other: 'FullUpstreamFingerprint') -> dict[str, list[str]] | None:
-            diffs = []
-            if self.input_fingerprint is not None:
-                diffs.append(self.input_fingerprint._inner_compare(other.input_fingerprint, ignore_external_data_last_modified=True))
-            if self.external_data_last_modified != other.external_data_last_modified:
-                diffs.append((self.external_data_last_modified, other.external_data_last_modified))
-            return diffs
+    def underlying_upstream_data_diffs(self, other: 'NodeFingerprint') -> dict[str, list[str]] | None:
+        diffs = []
+        if self.input_fingerprint is not None:
+            input_diffs = self.input_fingerprint._inner_compare(other.input_fingerprint, ignore_external_data_last_modified=True)
+            if input_diffs:
+                diffs.append(input_diffs)
+        if self.external_data_last_modified != other.external_data_last_modified:
+            diffs.append((self.external_data_last_modified, other.external_data_last_modified))
+        return diffs
 
-        def underlying_data_match(self, other: 'FullUpstreamFingerprint') -> bool:
-            """
-            Ignores external data last modified changes
-            """
-            if self.input_fingerprint is not None:
-                if not self.input_fingerprint.underlying_data_match(other.input_fingerprint):
-                    return False
-            elif self.external_data_last_modified != other.external_data_last_modified:
-                """
-                If the node itself uses external data that has since been modified, then the underlying data could possibly not match
-                """
-                return False
-            return True
