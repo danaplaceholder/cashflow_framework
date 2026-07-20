@@ -4,8 +4,7 @@ Computational graph visualizer/drawing
 """
 from base import BaseNode, ElementStatus
 import atexit
-import graphviz
-import os
+import re
 import subprocess
 import tempfile
 import time
@@ -22,11 +21,11 @@ color_key_legend[ElementStatus.WAITING_FOR_INPUT] = "#f8961e"
 color_key_legend[ElementStatus.COMPLETED] = "#90be6d"
 color_key_legend[ElementStatus.DELETED] = "#f94144"
 color_key_legend[ElementStatus.STATIC] = "#d3d2cb"
-color_black = "#000000"
 color_cluster_fill = "#F1EFE8"
 
 _TMP_DIR: str | None = None
 _EXPORT_REGISTERED = False
+_D2_KEY_RE = re.compile(r"[^A-Za-z0-9_]")
 
 
 def _ensure_tmp_dir() -> str:
@@ -75,90 +74,123 @@ def export_video() -> None:
 def _parse_status(name: str) -> ElementStatus:
     return ElementStatus(name.rsplit("__", 1)[-1])
 
+
 def get_color_for_status(status: ElementStatus | str) -> str:
     if not isinstance(status, ElementStatus):
         status = ElementStatus(status)
     return color_key_legend[status]
 
-def _node_attrs(name: str) -> dict:
-    return dict(
-        shape="box",
-        style="rounded,filled,bold",
-        fontname="Helvetica",
-        fontsize="11",
-        margin="0.18,0.10",
-        fillcolor="#ffffff",
-        color=get_color_for_status(_parse_status(name)),
-        penwidth="4",
-    )
 
-def _default_node_attrs() -> dict:
-    attrs = _node_attrs(f"x__{ElementStatus.CREATED.value}")
-    return attrs
+def _d2_key(name: str) -> str:
+    key = _D2_KEY_RE.sub("_", name)
+    if not key or key[0].isdigit():
+        key = f"n_{key}"
+    return key
 
-def _cluster_attrs(name: str) -> dict:
-    return dict(
-        style="rounded,filled,bold",
-        fillcolor=color_cluster_fill,
-        color=get_color_for_status(_parse_status(name)),
-        penwidth="4",
-        fontname="Helvetica",
-        fontsize="12",
-        labeljust="l",
-    )
 
-def build(nodes, contains, edges, filename="graph",
-          rankdir="LR", engine="dot", ranksep="0.9", nodesep="0.4"):
+def _escape_d2_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
 
-    g = graphviz.Digraph("g", format="svg", engine=engine)
-    g.attr(rankdir=rankdir, compound="true", splines="spline",
-           nodesep=nodesep, ranksep=ranksep, newrank="true")
-    g.attr("node", **_default_node_attrs())
-    
 
+def _shape_block(name: str, *, is_container: bool, indent: str) -> list[str]:
+    stroke = get_color_for_status(_parse_status(name))
+    fill = color_cluster_fill if is_container else "#ffffff"
+    label = _escape_d2_string(name)
+    return [
+        f'{indent}label: "{label}"',
+        f"{indent}style: {{",
+        f"{indent}  border-radius: 8",
+        f'{indent}  fill: "{fill}"',
+        f'{indent}  stroke: "{stroke}"',
+        f"{indent}  stroke-width: 6",
+        f"{indent}  font-size: 14",
+        f"{indent}  bold: true",
+        f"{indent}}}",
+    ]
+
+
+def _to_d2(nodes: dict, contains: dict, edges: list[tuple[str, str]]) -> str:
     container_ids = {cid for cid, kids in contains.items() if kids}
+    parent_of: dict[str, str] = {}
+    for parent, kids in contains.items():
+        for kid in kids:
+            parent_of[kid] = parent
 
-    def first_leaf(cid):
-        for ch in contains.get(cid, []):
-            return first_leaf(ch) if ch in container_ids else ch
-        return cid
+    def path_of(nid: str) -> str:
+        parts = [_d2_key(nid)]
+        cur = nid
+        while cur in parent_of:
+            cur = parent_of[cur]
+            parts.append(_d2_key(cur))
+        return ".".join(reversed(parts))
 
-    def emit(parent_graph, cid):
-        with parent_graph.subgraph(name=f"cluster_{cid}") as c:
-            c.attr("node", **_default_node_attrs())
-            c.attr(label=nodes.get(cid, cid), **_cluster_attrs(cid))
-            for child in contains[cid]:
-                if child in container_ids:
-                    emit(c, child)
-                else:
-                    c.node(child, nodes.get(child, child), **_node_attrs(child))
+    lines = [
+        "direction: right",
+        "vars: {",
+        "  d2-config: {",
+        "    layout-engine: elk",
+        "    theme-id: 0",
+        "  }",
+        "}",
+        'style.fill: "#ffffff"',
+        "",
+    ]
 
-    nested = {ch for kids in contains.values() for ch in kids}
-    for cid in container_ids:
-        if cid not in nested:
-            emit(g, cid)
+    def emit_container(cid: str, indent: str) -> None:
+        key = _d2_key(cid)
+        lines.append(f"{indent}{key}: {{")
+        lines.extend(_shape_block(cid, is_container=True, indent=indent + "  "))
+        for child in contains.get(cid, []):
+            if child in container_ids:
+                emit_container(child, indent + "  ")
+            else:
+                ckey = _d2_key(child)
+                lines.append(f"{indent}  {ckey}: {{")
+                lines.extend(_shape_block(child, is_container=False, indent=indent + "    "))
+                lines.append(f"{indent}  }}")
+        lines.append(f"{indent}}}")
+
+    nested = set(parent_of)
+    roots = [cid for cid in container_ids if cid not in nested]
+    for cid in roots:
+        emit_container(cid, "")
 
     placed = nested | container_ids
-    for nid, label in nodes.items():
+    for nid in nodes:
         if nid not in placed:
-            g.node(nid, label, **_node_attrs(nid))
+            key = _d2_key(nid)
+            lines.append(f"{key}: {{")
+            lines.extend(_shape_block(nid, is_container=False, indent="  "))
+            lines.append("}")
+
+    lines.append("")
+    seen: set[tuple[str, str]] = set()
     for src, dst in edges:
-        kw = {"color": "#888780", "penwidth": "0.8", "arrowsize": "0.7"}
-        s, d = src, dst
-        if src in container_ids:
-            s = first_leaf(src); kw["ltail"] = f"cluster_{src}"
-        if dst in container_ids:
-            d = first_leaf(dst); kw["lhead"] = f"cluster_{dst}"
-        g.edge(s, d, **kw)
+        s_path, d_path = path_of(src), path_of(dst)
+        if s_path == d_path or (s_path, d_path) in seen:
+            continue
+        seen.add((s_path, d_path))
+        lines.append(f"{s_path} -> {d_path}: {{")
+        lines.append('  style.stroke: "#888780"')
+        lines.append("  style.stroke-width: 2")
+        lines.append("}")
 
-    path = os.path.join(_ensure_tmp_dir(), filename)
-    g.render(path, cleanup=True)
-    return g
+    return "\n".join(lines) + "\n"
 
+
+def build(nodes, contains, edges, filename="graph"):
+    tmp = Path(_ensure_tmp_dir())
+    d2_path = tmp / f"{filename}.d2"
+    svg_path = tmp / f"{filename}.svg"
+    d2_path.write_text(_to_d2(nodes, contains, edges), encoding="utf-8")
+    subprocess.run(
+        ["d2", "--layout=elk", "--theme=0", str(d2_path), str(svg_path)],
+        check=True,
+    )
+    return svg_path
 
 
 def build_graph(node: BaseNode):
-
 
     def walk(node: BaseNode):
        nodes[node.element_name()] = node.element_name()
@@ -178,7 +210,7 @@ def build_graph(node: BaseNode):
              value = getattr(output, field_name)
              if isinstance(value, BaseNode):
                contains[node.element_name()].append(value.element_name())
-               walk(value)   
+               walk(value)
              elif isinstance(value, list ):
                for item in value:
                  if isinstance(item, BaseNode):
