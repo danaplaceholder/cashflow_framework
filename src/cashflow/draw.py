@@ -1,16 +1,15 @@
 """
 graph visualizer/drawing
-by Dana K
-by ai
+Written by ai, with guidance from Dana K
 """
 from base import BaseNode, ElementStatus
+import atexit
 import graphviz
 import os
+import subprocess
+import tempfile
 import time
-"""
-for f in *.svg; do rsvg-convert "$f" -o "${f%.svg}.png"; done 
-ffmpeg -framerate 24 -pattern_type glob -i '*.png'  -vf "scale=iw*8:ih*8:flags=neighbor,pad=ceil(iw/2)*2:ceil(ih/2)*2"  -c:v libx264 -pix_fmt yuv420p out5.mp4
-"""
+from pathlib import Path
 
 # -------------------------------------Visualization-------------------------------------
 #class FirmEconomicsNode(BaseNode):
@@ -31,9 +30,56 @@ color_key_legend[ElementStatus.UPDATING_OUTPUT] = "#577590"
 color_key_legend[ElementStatus.WAITING_FOR_INPUT] = "#f8961e"
 color_key_legend[ElementStatus.COMPLETED] = "#90be6d"
 color_key_legend[ElementStatus.DELETED] = "#f94144"
-color_key_legend[ElementStatus.STATIC] = "#000000"
+color_key_legend[ElementStatus.STATIC] = "#d3d2cb"
 color_black = "#000000"
 color_cluster_fill = "#F1EFE8"
+
+_TMP_DIR: str | None = None
+_EXPORT_REGISTERED = False
+
+
+def _ensure_tmp_dir() -> str:
+    global _TMP_DIR, _EXPORT_REGISTERED
+    if _TMP_DIR is None:
+        _TMP_DIR = tempfile.mkdtemp(prefix="cashflow_draw_")
+    if not _EXPORT_REGISTERED:
+        atexit.register(export_video)
+        _EXPORT_REGISTERED = True
+    return _TMP_DIR
+
+
+def export_video() -> None:
+    if _TMP_DIR is None:
+        return
+    tmp = Path(_TMP_DIR)
+    svgs = sorted(tmp.glob("*.svg"))
+    if not svgs:
+        return
+
+    for svg in svgs:
+        subprocess.run(
+            ["rsvg-convert", str(svg), "-o", str(svg.with_suffix(".png"))],
+            check=True,
+        )
+
+    timestamp = int(time.time())
+    out_path = Path.cwd() / f"output_{timestamp}.mp4"
+    subprocess.run(
+        [
+            "ffmpeg", "-y",
+            "-framerate", "24",
+            "-pattern_type", "glob",
+            "-i", "*.png",
+            "-vf", "scale=iw*8:ih*8:flags=neighbor,pad=ceil(iw/2)*2:ceil(ih/2)*2",
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            str(out_path),
+        ],
+        cwd=tmp,
+        check=True,
+    )
+    print(f"Saved animation to {out_path}")
+
 
 def _parse_status(name: str) -> ElementStatus:
     return ElementStatus(name.rsplit("_STATUS_", 1)[-1])
@@ -114,8 +160,8 @@ def build(nodes, contains, edges, filename="graph",
             d = first_leaf(dst); kw["lhead"] = f"cluster_{dst}"
         g.edge(s, d, **kw)
 
-    g.render(filename, cleanup=True)
-    print(f"{ os.path.join(os.path.dirname(__file__), filename)}")
+    path = os.path.join(_ensure_tmp_dir(), filename)
+    g.render(path, cleanup=True)
     return g
 
 
@@ -153,4 +199,3 @@ def build_graph(node: BaseNode):
     edges = []
     walk(node)
     build(nodes=nodes, contains=contains, edges=edges, filename=f"trade_analysis_graph{ time.time() }")
-
