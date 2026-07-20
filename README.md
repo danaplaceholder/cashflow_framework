@@ -2,7 +2,7 @@
 Ideation and backend code 100% painstakingly and iteratively done by me, danaplaceholder. 
 Visualization+drawing mostly done by ai, with guidance from danaplaceholder. 
 
-Computational graph framework for state-dependent incremental computation. 
+# State-dependent incremental computation. 
 - Monadic: ***Just create Nodes***. Can be nested.
     All dependency construction and data updates/management falls out automatically from Node relationships per input/output/created_by.
 - Dynamic: Nodes can be created/deleted based on results from other Nodes. 
