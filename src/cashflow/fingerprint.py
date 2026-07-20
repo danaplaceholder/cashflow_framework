@@ -87,13 +87,11 @@ class CollectionFingerprint(GraphElementFingerprint):
                     else:
                         new_diffs = old_node_fingerprint._inner_compare(new_identity_key_dict[identity_key], ignore_external_data_last_modified=ignore_external_data_last_modified)
                         if new_diffs:
-                            field_diffs.append(new_diffs)
+                            field_diffs.append(new_diffs) 
                     
                 for identity_key, _ in new_identity_key_dict.items():
                     if identity_key not in old_identity_key_dict:
-                        field_diffs.append({identity_key: "REFERENCE_ADDED"})
-                    else:
-                        continue
+                        field_diffs.append({identity_key: "REFERENCE_ADDED"}) 
             else:
                 old_value = self.field_fingerprint_dict.get(field_name)
                 new_value = new_fingerprint.field_fingerprint_dict.get(field_name)
@@ -104,12 +102,8 @@ class CollectionFingerprint(GraphElementFingerprint):
                     if new_diffs:
                         field_diffs.append(new_diffs)
             if field_diffs:
-                diffs[field_name] = field_diffs
-            else:
-                continue
+                diffs[field_name] = field_diffs 
         return diffs
-
-
             
 
 class DataFingerprint(GraphElementFingerprint):
@@ -121,7 +115,7 @@ class DataFingerprint(GraphElementFingerprint):
     def _inner_compare(self, new_fingerprint: 'DataFingerprint', ignore_external_data_last_modified: bool) -> None:
         if self.data_hash != new_fingerprint.data_hash:
             return [{"OLD_DATA_HASH": self.data_hash, "NEW_DATA_HASH": new_fingerprint.data_hash}]
-        return []
+        return None
 
 class OutputFingerprint(CollectionFingerprint):
     field_fingerprint_dict: 'dict[str, DataFingerprint | NodeFingerprint | list[DataFingerprint | NodeFingerprint]]'  
@@ -194,6 +188,10 @@ class NodeFingerprint(GraphElementFingerprint):
             if input_diffs:
                 diffs.append(input_diffs)
         if self.external_data_last_modified != other.external_data_last_modified:
-            diffs.append((self.external_data_last_modified, other.external_data_last_modified))
-        return diffs
+            diffs.append(({"last_modified": {"OLD": self.external_data_last_modified, "NEW": other.external_data_last_modified}}))
+        
+        if len(diffs) > 0:
+            return diffs
+        else:
+            return None
 

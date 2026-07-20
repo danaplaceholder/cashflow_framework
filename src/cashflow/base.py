@@ -7,6 +7,9 @@ from cashflow.fingerprint import DataFingerprint, NodeFingerprint, InputFingerpr
 from abc import ABC, abstractmethod
 from pprint import pprint
 class GraphStateError(Exception):
+    """
+    Currently only raised when a DELETED Node is accessed
+    """
     pass
 
 class Collection(BaseModel, ABC):
@@ -233,9 +236,9 @@ class BaseNode(BaseGraphElement):
         """
         A node should recompute if its created_by, input, or external data has changed since last computation
         """
-        #refresh created by 
+        #IMPORTANT: refresh created_by.output to make sure node is configured up-to-date with correct input etc. 
         if self.created_by is not None and not self.created_by.output.contains(self):
-            raise ValueError(f"Node {self.created_by.identity_key()} of class {self.created_by.__class__.__name__} should not exist. This can happen if you specifically ask for a node that has been deleted but should not happen asynchronously.")
+            raise GraphStateError(f"Node {self.created_by.identity_key()} of class {self.created_by.__class__.__name__} should not exist. This can happen if you specifically ask for a node that has been deleted but should not happen asynchronously.")
 
         return NodeFingerprint(
             identity_key=self.identity_key(),
@@ -269,7 +272,10 @@ class BaseNode(BaseGraphElement):
         return self.__class__.__name__ + "_" +  self.alias + "_STATUS_" + self._status.value
     
     @property                       
-    def output(self) -> Output:     
+    def output(self) -> Output:
+            """
+            The engine of the graph. Checks if should recompute, updates the graph if so. 
+            """     
             # refresh created by 
             latest_upstream_data_fingerprint = self.upstream_data_fingerprint()
             if self._output is None or self._outer_should_recompute_output(latest_upstream_data_fingerprint=latest_upstream_data_fingerprint):
@@ -309,7 +315,8 @@ class BaseNode(BaseGraphElement):
 
         # COMPUTE
         computed_output = self._compute_output()
-        computed_output.set_created_by(self)
+        # IMPORTANT: attach self to all output nodes as .created_by
+        computed_output.set_created_by(self) 
 
         # check if upstream data changed since computation
         post_compute_upstream_data_fingerprint = self.upstream_data_fingerprint()
@@ -343,7 +350,9 @@ class BaseNode(BaseGraphElement):
                 value.set_status_deleted()
         
     def _outer_should_recompute_output(self, latest_upstream_data_fingerprint: NodeFingerprint) -> bool:
-
+        """
+        Checks if the output should be recomputed based on the latest upstream data fingerprint.
+        """
         if self._output is None:
             print(f"Should recompute output for {self.identity_key()} because output is None")
             return True
