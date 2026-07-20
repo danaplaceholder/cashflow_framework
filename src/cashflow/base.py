@@ -313,7 +313,7 @@ class BaseNode(BaseGraphElement):
         # mark as computing output
         self.set_status(ElementStatus.COMPUTING_OUTPUT)
 
-        # COMPUTE
+        # compute output
         computed_output = self._compute_output()
         # IMPORTANT: attach self to all output nodes as .created_by
         computed_output.set_created_by(self) 
@@ -331,6 +331,7 @@ class BaseNode(BaseGraphElement):
                 self._output = computed_output
                 self._output.set_upstream_data_fingerprint(pre_compute_upstream_data_fingerprint)
             else:
+                # IMPORTANT: This will make sure all existing "live" output nodes inside of this current node get reconfigured to point to the correct input etc. 
                 self._output.update(computed_output, new_upstream_data_fingerprint=pre_compute_upstream_data_fingerprint)
 
             # mark as completed
