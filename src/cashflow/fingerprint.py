@@ -22,8 +22,14 @@ class GraphElementFingerprint(BaseModel):
         self._inner_update(new_fingerprint)
         self._bump_version()
 
+    def _inner_compare(self, new_fingerprint: 'GraphElementFingerprint') -> None:
+        raise NotImplementedError("Subclasses must implement this method")
+
     def _inner_update(self, new_fingerprint: 'GraphElementFingerprint') -> None:
         raise NotImplementedError("Subclasses must implement this method")
+
+
+    
 
 
 class CollectionFingerprint(GraphElementFingerprint):
@@ -97,7 +103,10 @@ class CollectionFingerprint(GraphElementFingerprint):
                     new_diffs = old_value._inner_compare(new_value, ignore_external_data_last_modified=ignore_external_data_last_modified)
                     if new_diffs:
                         field_diffs.append(new_diffs)
-            diffs[field_name] = field_diffs
+            if field_diffs:
+                diffs[field_name] = field_diffs
+            else:
+                continue
         return diffs
 
 
@@ -126,8 +135,14 @@ class NodeFingerprint(GraphElementFingerprint):
     external_data_last_modified: int | None = None
 
     def _inner_update(self, new_fingerprint: 'NodeFingerprint') -> None:
-        self.input_fingerprint.update(new_fingerprint.input_fingerprint)
-        self.output_fingerprint.update(new_fingerprint.output_fingerprint)
+        if self.input_fingerprint is None:
+            self.input_fingerprint = new_fingerprint.input_fingerprint
+        elif new_fingerprint.input_fingerprint is not None:
+            self.input_fingerprint.update(new_fingerprint.input_fingerprint)
+        if self.output_fingerprint is None:
+            self.output_fingerprint = new_fingerprint.output_fingerprint
+        elif new_fingerprint.output_fingerprint is not None:
+            self.output_fingerprint.update(new_fingerprint.output_fingerprint)
         if self.external_data_last_modified != new_fingerprint.external_data_last_modified:
             self.external_data_last_modified = new_fingerprint.external_data_last_modified
     

@@ -78,7 +78,10 @@ class Output(Collection):
             return OutputFingerprint(identity_key="some_output", field_fingerprint_dict=field_fingerprint_dict)
        
         def set_upstream_data_fingerprint(self, new_upstream_data_fingerprint: NodeFingerprint) -> None:
-            self._upstream_data_fingerprint = new_upstream_data_fingerprint # TODO: use update? 
+            if self._upstream_data_fingerprint is None:
+                self._upstream_data_fingerprint = new_upstream_data_fingerprint
+            else:
+                self._upstream_data_fingerprint.update(new_upstream_data_fingerprint)
 
         def set_created_by(self, created_by: 'BaseNode') -> None:
             """
