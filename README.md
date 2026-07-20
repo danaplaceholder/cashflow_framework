@@ -16,7 +16,7 @@ Computational graph framework for state-dependent incremental computation.
 
 ```
 docker compose run --rm dev
-python src/cashflow/exampmle1.py 
+python src/cashflow/example1.py 
 ```
 ...
 ```
