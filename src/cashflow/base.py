@@ -63,7 +63,7 @@ class Input(Collection):
                                 updated_list.append(old_dict[key])
                             else:
                                 updated_list.append(new_dict[key])
-                            # leave things as is if old_dict has the key but new_dict does not.... just cause a node is no longer in our output, doesn't mean we should delete it from the graph
+                            # leave things as is if old_dict has the key but new_dict does not.... just cause a node is no longer in our input/just because WE don't need it, doesn't mean we should delete it from the graph
                         setattr(self, field_name, updated_list)
                 elif issubclass(old_input_value.__class__, BaseNode):
                     if old_input_value.identity_key() == new_input_value.identity_key():
@@ -139,7 +139,7 @@ class Output(Collection):
                             for key, _ in new_dict.items():
                                 if key in old_dict:
                                     updated_old_value = old_dict[key]
-                                    updated_old_value.set_input(new_dict[key].input)
+                                    updated_old_value.set_input(new_dict[key]._input)
                                     updated_list.append(updated_old_value)
                                 else:
                                     updated_list.append(new_dict[key])
@@ -151,7 +151,7 @@ class Output(Collection):
                             setattr(self, field_name, new_value)
                     elif issubclass(old_value.__class__, BaseNode):
                         if old_value.identity_key() == new_value.identity_key():
-                          old_value.set_input(new_value.input)
+                          old_value.set_input(new_value._input)
                         else:
                             old_value.set_status_deleted()
                             setattr(self, field_name, new_value)
@@ -218,7 +218,7 @@ class BaseDataElement(BaseGraphElement):
         )
 class BaseNode(BaseGraphElement):
     # TODO Caching layer ? 
-    input: Input = Field(default=None)
+    _input: Input = Field(default=None)
     _output: Output = PrivateAttr(default=None)
     _upstream_data_fingerprint: NodeFingerprint = PrivateAttr(default=None)
     _fingerprint: NodeFingerprint = PrivateAttr(default=None)
@@ -236,6 +236,13 @@ class BaseNode(BaseGraphElement):
             output_fingerprint=item_output.recursive_output_fingerprint() if item_output is not None else None,
             external_data_last_modified=None,
         )
+
+    @property
+    def input(self) -> Input:
+        """
+        Returns a View of the input that is read-only and cannot be modified.
+        """
+        return InputView(self._input) if self._input is not None else None
 
     def upstream_data_fingerprint(self ) -> NodeFingerprint:
         """
@@ -372,12 +379,41 @@ class BaseNode(BaseGraphElement):
                 return False
 
     def set_input(self, new_input: 'BaseNode.Input') -> None:
-        if self.input is None:
-            self.input = new_input
+        if self._input is None:
+            self._input = new_input
         else:
-            self.input.update(new_input)
-        
+            self._input.update(new_input)
+
+class SealedNode:
+    """Restricted handle to a BaseNode reached via someone else's .input."""
+    def __init__(self, node: "BaseNode"):
+        # use object.__setattr__ so we don't go through our own __setattr__
+        object.__setattr__(self, "_node", node)
+    @property
+    def input(self):
+        raise GraphStateError(
+            "Cannot access .input on a node reached through another node's input"
+        )
+    def __getattr__(self, name: str):
+        # Everything else (.output, identity_key, alias, ...) hits the real node
+        return getattr(self._node, name)
+    def __setattr__(self, name: str, value):
+        raise AttributeError("SealedNode is read-only")
+    def __repr__(self) -> str:
+        return f"SealedNode({self._node!r})"        
     
+class InputView:
+    def __init__(self, real_input: "Input"):
+        object.__setattr__(self, "_input", real_input)
+    def __getattr__(self, name: str):
+        value = getattr(self._input, name)
+        if isinstance(value, BaseNode):
+            return SealedNode(value)
+        elif isinstance(value, list) and value and isinstance(value[0], BaseNode):
+            return [SealedNode(item) for item in value]
+        else:
+            raise ValueError(f"Invalid type for {name}: {type(value)}")
+
 class StaticOutputNode(BaseNode):
     """
     Useful for injecting "input" data into other Nodes. E.g. as pseudo-configs for nodes

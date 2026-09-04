@@ -33,6 +33,10 @@ class GraphElementFingerprint(BaseModel):
 
 
 class CollectionFingerprint(GraphElementFingerprint):
+    """
+    Fingerprint a class instance that has multiple fields
+    Used for Input/Output of Nodes
+    """
     def _inner_update(self, new_fingerprint: 'OutputFingerprint') -> None:
         """
         Recurse through nested field_fingerprint_dict for Input/Output instances of a Node
@@ -123,6 +127,10 @@ class InputFingerprint(CollectionFingerprint):
     field_fingerprint_dict: 'dict[str,  NodeFingerprint | list[  NodeFingerprint]]' 
 
 class NodeFingerprint(GraphElementFingerprint):
+    """
+    Fingerprint a single Node
+    Tracks fingerprints of Node's Input, Ouput, and External Data
+    """
     identity_key: str
     input_fingerprint: InputFingerprint | None = None
     output_fingerprint: OutputFingerprint | None = None
