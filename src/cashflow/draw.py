@@ -195,7 +195,7 @@ def build_graph(node: BaseNode):
     def walk(node: BaseNode):
        nodes[node.element_name()] = node.element_name()
        output = node._output
-       input = node.input
+       input = node._input
        if input:
            for field_name, field_info in input.__class__.model_fields.items():
              value = getattr(input, field_name)

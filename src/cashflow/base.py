@@ -5,12 +5,12 @@ Monadic computational graph framework
 """
 from pydantic import BaseModel
 from pydantic import PrivateAttr
-from pydantic import Field
 import logging
 from enum import StrEnum
 from cashflow.fingerprint import DataFingerprint, NodeFingerprint, InputFingerprint, OutputFingerprint
 from abc import ABC, abstractmethod
 from pprint import pprint
+from pydantic import model_validator
 class GraphStateError(Exception):
     """
     Currently only raised when a DELETED Node is accessed
@@ -37,7 +37,23 @@ class Collection(BaseModel, ABC):
     def make_fingerprint(cls, field_fingerprint_dict: dict[str, DataFingerprint | NodeFingerprint | list[DataFingerprint | NodeFingerprint] | None]) -> InputFingerprint | OutputFingerprint:
         raise NotImplementedError("Subclasses must implement this method")
 
+def _unwrap(value):
+            if isinstance(value, SealedNode):
+                return value._node
+            if isinstance(value, list):
+                return [_unwrap(v) for v in value]
+            return value
 class Input(Collection):
+
+
+
+        @model_validator(mode="before")
+        @classmethod
+        def unwrap_sealed_nodes(cls, data):
+            if not isinstance(data, dict):
+                return data
+            return {key: _unwrap(value) for key, value in data.items()}
+            
         
         @classmethod
         def make_fingerprint(cls, field_fingerprint_dict: dict[str, DataFingerprint | NodeFingerprint | list[DataFingerprint | NodeFingerprint] | None]) -> InputFingerprint:
@@ -218,11 +234,15 @@ class BaseDataElement(BaseGraphElement):
         )
 class BaseNode(BaseGraphElement):
     # TODO Caching layer ? 
-    _input: Input = Field(default=None)
+    _input: Input = PrivateAttr(default=None)
     _output: Output = PrivateAttr(default=None)
     _upstream_data_fingerprint: NodeFingerprint = PrivateAttr(default=None)
     _fingerprint: NodeFingerprint = PrivateAttr(default=None)
     _status: ElementStatus = PrivateAttr(default=ElementStatus.CREATED)
+
+    def __init__(self, input: Input | None = None, *args, **kwargs):
+        super().__init__(input=input, *args, **kwargs)
+        self._input = input
 
     @property
     def fingerprint(self) -> NodeFingerprint:
@@ -412,7 +432,7 @@ class InputView:
         elif isinstance(value, list) and value and isinstance(value[0], BaseNode):
             return [SealedNode(item) for item in value]
         else:
-            raise ValueError(f"Invalid type for {name}: {type(value)}")
+            return value
 
 class StaticOutputNode(BaseNode):
     """
