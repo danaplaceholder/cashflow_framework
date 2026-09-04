@@ -50,6 +50,9 @@ class Input(Collection):
         @model_validator(mode="before")
         @classmethod
         def unwrap_sealed_nodes(cls, data):
+            """
+            When a Node in Input should be passed into a newly created Node, we need to unwrap the SealedNode to get the actual Node
+            """
             if not isinstance(data, dict):
                 return data
             return {key: _unwrap(value) for key, value in data.items()}
