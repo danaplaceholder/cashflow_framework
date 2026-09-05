@@ -40,12 +40,11 @@ class Collection(BaseModel, ABC):
 def _unwrap(value):
             if isinstance(value, SealedNode):
                 return value._node
-            if isinstance(value, list):
+            elif isinstance(value, list):
                 return [_unwrap(v) for v in value]
             return value
+            
 class Input(Collection):
-
-
 
         @model_validator(mode="before")
         @classmethod
